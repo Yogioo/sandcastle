@@ -25,6 +25,10 @@
 //
 // Usage:
 //   Run the generated file at the path printed by `sandcastle init`.
+//
+// Logs: one run directory per process, one loop subdirectory per
+// implement→review cycle that actually starts — see AGENTS.md → Logs for
+// the layout and how to find a cycle by task id.
 
 import {
   run,
@@ -34,9 +38,18 @@ import {
 } from "@yogioo/sandcastle";
 import { docker } from "@yogioo/sandcastle/sandboxes/docker";
 import { execSync } from "node:child_process";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import {
+  iterationPadWidth,
+  localTimestamp,
+  padStart,
+  pointerLine,
+  teeConsole,
+  uniqueDirName,
+} from "./logs.js";
 
 const repoDir = process.cwd();
 const workflowDir = fileURLToPath(new URL(".", import.meta.url));
@@ -122,7 +135,7 @@ const probeReadyTasks = (): ReadyProbe => {
     const stdout = execSync(LIST_TASKS_COMMAND, {
       cwd: repoDir,
       encoding: "utf-8",
-      shell: true,
+      // execSync already runs the command in the platform default shell.
       stdio: ["ignore", "pipe", "pipe"],
     });
     return { ok: true, count: parseReadyCount(stdout) };
@@ -131,6 +144,27 @@ const probeReadyTasks = (): ReadyProbe => {
     return { ok: false };
   }
 };
+
+// ---------------------------------------------------------------------------
+// Logging layout
+// ---------------------------------------------------------------------------
+// One process = one run directory under logs/; one implement→review cycle
+// that actually starts = one loop subdirectory. Nothing is deleted or
+// rotated — pointer lines in main.log map task ids to loop directories.
+
+const logsRoot = join(workflowDir, "logs");
+const runDir = join(
+  logsRoot,
+  uniqueDirName(logsRoot, `run-${localTimestamp()}`),
+);
+mkdirSync(runDir, { recursive: true });
+const mainLogPath = join(runDir, "main.log");
+const loopPadWidth = iterationPadWidth(MAX_ITERATIONS);
+
+// Tee host console output into main.log (terminal output is preserved).
+// Patched before the first run() so the `tail -f` startup hints land in the
+// file as well.
+teeConsole(mainLogPath);
 
 // ---------------------------------------------------------------------------
 // Main loop
@@ -163,6 +197,16 @@ while (iteration < MAX_ITERATIONS) {
   iteration += 1;
   console.log(`\n=== Iteration ${iteration}/${MAX_ITERATIONS} ===\n`);
 
+  // One loop directory per cycle that actually starts — idle polls never
+  // reach this point. Both logs live in it; an <outcome> retry appends to
+  // the same implement.log instead of creating a new directory.
+  const loopDirName = uniqueDirName(
+    runDir,
+    `${padStart(iteration, loopPadWidth)}-${localTimestamp()}`,
+  );
+  const loopDir = join(runDir, loopDirName);
+  mkdirSync(loopDir, { recursive: true });
+
   // Capture HEAD before implement so review diffs only this pass's commits.
   const baseSha = execSync("git rev-parse HEAD", {
     cwd: repoDir,
@@ -179,6 +223,7 @@ while (iteration < MAX_ITERATIONS) {
     promptFile: join(workflowDir, "implement-prompt.md"),
     branchStrategy: { type: "head" as const },
     output: outcomeOutput(),
+    logging: { type: "file" as const, path: join(loopDir, "implement.log") },
   };
 
   // -----------------------------------------------------------------------
@@ -263,6 +308,12 @@ while (iteration < MAX_ITERATIONS) {
       ` — ${commits.length} commit(s).`,
   );
 
+  // Pointer line: map this cycle's task id to its loop directory. Teed into
+  // main.log by the console patch above.
+  console.log(
+    pointerLine(iteration, loopPadWidth, status, taskId, loopDirName),
+  );
+
   // -----------------------------------------------------------------------
   // Phase 2: Review
   //
@@ -285,6 +336,7 @@ while (iteration < MAX_ITERATIONS) {
           BASE_SHA: baseSha,
         },
         branchStrategy: { type: "head" },
+        logging: { type: "file" as const, path: join(loopDir, "reviewer.log") },
       });
       console.log("\nReview complete.");
     } catch (error) {

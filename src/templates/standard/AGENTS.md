@@ -6,13 +6,13 @@ After **init**, edit files here. **Agent** (+ optional **model**), **sandbox pro
 
 ## Workflow features
 
-| Feature           | Recipe                      | Notes                                                                                                |
-| ----------------- | --------------------------- | ---------------------------------------------------------------------------------------------------- |
-| **worktree**      | `recipes/worktree/`         | Named branch + `createSandbox`; review diffs `BRANCH` against `TARGET_BRANCH`, not `BASE_SHA..HEAD`. |
-| **planner**       | `recipes/planner/`          | Plan → parallel execute → merge. **Requires worktree first.**                                        |
-| _(not a feature)_ | `recipes/sandbox-provider/` | Redo the **init** **sandbox provider** choice (docker ↔ podman ↔ no-sandbox). Not orchestration.     |
+| Feature           | Recipe                      | Notes                                                                                                                                      |
+| ----------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **worktree**      | `recipes/worktree/`         | Named branch + `createSandbox`; review diffs `BRANCH` against `TARGET_BRANCH`, not `BASE_SHA..HEAD`.                                       |
+| **planner**       | `recipes/planner/`          | Plan → parallel execute → merge. **Requires worktree first.**                                                                              |
+| _(not a feature)_ | `recipes/sandbox-provider/` | Redo the **init** **sandbox provider** choice (docker ↔ podman ↔ no-sandbox). Not orchestration.                                           |
 | _(not a feature)_ | `recipes/agent/`            | Redo the **init** **agent** choice and its optional **model** (claude-code ↔ pi ↔ codex ↔ cursor ↔ opencode ↔ copilot). Not orchestration. |
-| _(not a feature)_ | `recipes/issue-tracker/`    | Redo the **init** **issue tracker** choice (github-issues ↔ beads ↔ custom). Not orchestration.      |
+| _(not a feature)_ | `recipes/issue-tracker/`    | Redo the **init** **issue tracker** choice (github-issues ↔ beads ↔ custom). Not orchestration.                                            |
 
 Apply a feature by reading that recipe folder (short README + sliced reference code) and editing the copied files.
 
@@ -27,6 +27,22 @@ Do not add **planner** on **head**. Parallel execute needs a named **branch** an
 1. Delete the review phase from root `main.ts` / `main.mts` (the `reviewer` `run()`, `BASE_SHA` capture, and the skip/review branch).
 2. Delete `review-prompt.md`.
 3. Leave implement + idle poll as the loop. The running **workflow template** itself is the reference.
+
+## Logs
+
+One run directory per process, one loop subdirectory per implement→review cycle that actually starts (under `logs/` in this config directory):
+
+```
+logs/run-<yyyyMMdd-HHmmss>/
+  main.log                             <- host transcript (terminal is a tee)
+  <pad(i)>-<yyyyMMdd-HHmmss>/
+    implement.log
+    reviewer.log                       <- only when review runs
+```
+
+- `main.log` tees the host console. After every implement phase it records a pointer line with the task id, e.g. `01 done sandcastle-i5u → 01-20260813-175241/` — look up a task id there to find its loop directory.
+- Idle polls create no loop directory; an `<outcome>` retry appends to the same `implement.log`.
+- Timestamps are local machine time; the `pad(i)` width matches the iteration budget (`10` → `01`…`10`). Old run directories are never deleted or rotated.
 
 ## Switch sandbox provider
 

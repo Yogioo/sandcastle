@@ -107,6 +107,30 @@ describe("InitService scaffold", () => {
     expect(main).toContain('from "@yogioo/sandcastle"');
   });
 
+  it("wires the run/loop logging layout into standard scaffolds", async () => {
+    const repoDir = await makeDir();
+    const stateDir = join(repoDir, "cache", ".sandcastle");
+
+    await runScaffold(repoDir, {
+      stateDir,
+      templateName: "standard",
+    });
+
+    const main = await readFile(join(stateDir, "main.mts"), "utf-8");
+    const logs = await readFile(join(stateDir, "logs.ts"), "utf-8");
+    expect(main).toContain('from "./logs.js"');
+    expect(main).toContain("`run-${localTimestamp()}`");
+    expect(main).toContain('join(runDir, "main.log")');
+    expect(main).toContain(
+      'logging: { type: "file" as const, path: join(loopDir',
+    );
+    expect(main).toContain("implement.log");
+    expect(main).toContain("reviewer.log");
+    expect(main).toContain("pointerLine(");
+    expect(logs).toContain("localTimestamp");
+    expect(logs).toContain("uniqueDirName");
+  });
+
   it("makes reviewer standards visible without exposing the env file", async () => {
     const repoDir = await makeDir();
     const stateDir = join(repoDir, "cache", ".sandcastle");
@@ -555,7 +579,9 @@ describe("InitService scaffold", () => {
       expect(agentsMd).toContain("`recipes/sandbox-provider/`");
       // The factory guard maps each init choice to its recipe.
       expect(agentsMd).toContain("`recipes/agent/` (agent or model)");
-      expect(agentsMd).toContain("`recipes/issue-tracker/`, or `recipes/sandbox-provider/`");
+      expect(agentsMd).toContain(
+        "`recipes/issue-tracker/`, or `recipes/sandbox-provider/`",
+      );
       // The model is covered by the agent recipe, not a recipe of its own.
       expect(agentsMd).not.toContain("recipes/model/");
     });
