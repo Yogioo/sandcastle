@@ -191,6 +191,19 @@ describe("InitService scaffold", () => {
     },
   );
 
+  it("creates a writable .env alongside .env.example", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir);
+
+    const envExample = await readFile(
+      join(dir, ".sandcastle", ".env.example"),
+      "utf-8",
+    );
+    const env = await readFile(join(dir, ".sandcastle", ".env"), "utf-8");
+
+    expect(env).toBe(envExample);
+  });
+
   it("generates .env.example with GH_TOKEN when issue tracker is github-issues", async () => {
     const dir = await makeDir();
     await runScaffold(dir, {

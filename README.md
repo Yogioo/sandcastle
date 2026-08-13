@@ -43,11 +43,10 @@ sandcastle init
 
 也可以初始化另一个仓库：`sandcastle init C:/projects/another-repo`。在 Windows 上，默认位置类似 `%LOCALAPPDATA%\Sandcastle\projects\<项目标识>\.sandcastle\`。`init` 会登记项目清单并输出实际状态目录和入口文件；若需要自定义位置，传入 `--state-dir`。
 
-3. 编辑输出路径下的 `.env`，填入 `CLAUDE_CODE_OAUTH_TOKEN`（在宿主机运行 `claude setup-token` 获取）。若使用 Anthropic API Key，取消注释并填写 `ANTHROPIC_API_KEY`。
-
-```bash
-cp <init 输出的状态目录>/.env.example <init 输出的状态目录>/.env
-```
+3. `init` 会自动在输出的状态目录中创建 `.env`。如果需要自定义凭据，
+编辑该文件，填入 `CLAUDE_CODE_OAUTH_TOKEN`（在宿主机运行
+`claude setup-token` 获取）；若使用 Anthropic API Key，取消注释并填写
+`ANTHROPIC_API_KEY`。也可以使用系统环境变量或已有的 CLI 登录状态。
 
 4. 运行 CLI。它会使用当前仓库的已登记项目；若当前目录不是已登记项目，则显示项目选择列表：
 

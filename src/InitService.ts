@@ -1303,6 +1303,9 @@ export const scaffold = (
       fs
         .writeFileString(join(configDir, ".env.example"), envExampleContent)
         .pipe(Effect.mapError((e) => new Error(e.message))),
+      fs
+        .writeFileString(join(configDir, ".env"), envExampleContent)
+        .pipe(Effect.mapError((e) => new Error(e.message))),
       copyTemplateFiles(templateDir, configDir, mainFilename),
     ];
 
