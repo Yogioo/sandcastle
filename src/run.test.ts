@@ -559,7 +559,7 @@ describe("buildRunSummaryRows", () => {
   it("uses the custom name as Agent when name is provided", () => {
     const rows = buildRunSummaryRows({
       name: "Implementer #202",
-      agentName: "claude-code",
+      agentProvider: "claude-code",
       sandboxName: "docker",
       maxIterations: 3,
       branch: "main",
@@ -567,9 +567,9 @@ describe("buildRunSummaryRows", () => {
     expect(rows["Agent"]).toBe("Implementer #202");
   });
 
-  it("falls back to agentName when no name is provided", () => {
+  it("falls back to agentProvider when no name is provided", () => {
     const rows = buildRunSummaryRows({
-      agentName: "claude-code",
+      agentProvider: "claude-code",
       sandboxName: "docker",
       maxIterations: 1,
       branch: "main",
@@ -577,9 +577,37 @@ describe("buildRunSummaryRows", () => {
     expect(rows["Agent"]).toBe("claude-code");
   });
 
+  it("includes AgentProvider row equal to the provider name", () => {
+    const rows = buildRunSummaryRows({
+      name: "Implementer #202",
+      agentProvider: "pi",
+      sandboxName: "no-sandbox",
+      maxIterations: 1,
+      branch: "main",
+    });
+    expect(rows["AgentProvider"]).toBe("pi");
+  });
+
+  it("places AgentProvider directly after the Agent row", () => {
+    const rows = buildRunSummaryRows({
+      name: "reviewer",
+      agentProvider: "pi",
+      sandboxName: "no-sandbox",
+      maxIterations: 1,
+      branch: "main",
+    });
+    expect(Object.keys(rows)).toEqual([
+      "Agent",
+      "AgentProvider",
+      "Sandbox",
+      "Max iterations",
+      "Branch",
+    ]);
+  });
+
   it("includes sandbox name, max iterations, and branch", () => {
     const rows = buildRunSummaryRows({
-      agentName: "claude-code",
+      agentProvider: "claude-code",
       sandboxName: "docker",
       maxIterations: 5,
       branch: "sandcastle/issue-160",
@@ -591,12 +619,13 @@ describe("buildRunSummaryRows", () => {
 
   it("does not include a Model row", () => {
     const rows = buildRunSummaryRows({
-      agentName: "claude-code",
+      agentProvider: "claude-code",
       sandboxName: "docker",
       maxIterations: 1,
       branch: "main",
     });
     expect(rows["Model"]).toBeUndefined();
+    expect(rows["Effect"]).toBeUndefined();
   });
 });
 

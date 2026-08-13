@@ -162,7 +162,7 @@ export const buildLogFilename = (
 
 export interface RunSummaryRowsOptions {
   readonly name?: string;
-  readonly agentName: string;
+  readonly agentProvider: string;
   readonly sandboxName: string;
   readonly maxIterations: number;
   readonly branch: string;
@@ -170,13 +170,15 @@ export interface RunSummaryRowsOptions {
 
 /**
  * Build the summary rows for a run, used in both terminal mode and
- * log-to-file mode. When a custom name is provided it appears as the
- * Agent value instead of the internal provider name.
+ * log-to-file mode. `Agent` shows the custom run name when provided,
+ * falling back to the provider name; `AgentProvider` is always the
+ * provider name (e.g. `pi` / `claude-code`).
  */
 export const buildRunSummaryRows = (
   options: RunSummaryRowsOptions,
 ): Record<string, string> => ({
-  Agent: options.name ?? options.agentName,
+  Agent: options.name ?? options.agentProvider,
+  AgentProvider: options.agentProvider,
   Sandbox: options.sandboxName,
   "Max iterations": String(options.maxIterations),
   Branch: options.branch,
@@ -635,7 +637,7 @@ export async function run(
     }
   }
 
-  const agentName = provider.name;
+  const agentProvider = provider.name;
 
   // Resolve env vars and merge with provider env
   const resolvedEnv = await Effect.runPromise(
@@ -724,7 +726,7 @@ export async function run(
     yield* d.intro(options.name ?? "sandcastle");
     const rows = buildRunSummaryRows({
       name: options.name,
-      agentName,
+      agentProvider,
       sandboxName: options.sandbox.name,
       maxIterations,
       branch: resolvedBranch,
