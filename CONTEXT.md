@@ -83,12 +83,24 @@ The Effect service (`Context.Tag`) that wraps the raw call handing a fully-resol
 _Avoid_: "agent runner", "agent caller"
 
 **Iteration**:
-A single invocation of the **agent** inside the **sandbox**, producing at most one commit against one **task**.
+A single invocation of the **agent** inside the **sandbox** against one **task**. The **implement workflow** typically produces at most one commit; the **planning workflow** typically writes to the **issue tracker** and may produce no commit.
 _Avoid_: "run" (ambiguous with the JS `run()` function), "cycle", "loop"
 
 **Task**:
-A work item from the **issue tracker** that the **agent** selects and works on during an **iteration**.
+A work item from the **issue tracker** that an **agent** selects during an **iteration**.
 _Avoid_: "job", "work item", "ticket"
+
+**Discussion task**:
+A **task** used only by the **planning workflow** to grill a requirement on the issue itself. It never appears in the **implement workflow**'s list. Identified by the `needs-planning` label (or the tracker equivalent).
+_Avoid_: "intake issue", "planning ticket", "parent issue" (too generic), calling it a **ready task**
+
+**Ready task**:
+A **task** pickable by the **implement workflow**. GitHub: `Sandcastle` label. Beads: `bd ready` excluding **discussion tasks**. Children created by the tickets **planning phase** are **ready tasks**; the parent **discussion task** is not.
+_Avoid_: "open issue", "unblocked issue" (Beads-ready is not the same as GitHub-open)
+
+**Planning phase**:
+One of grill, spec, or tickets — a single **iteration** of the **planning workflow**. The host starts only the current phase; the next phase is a new **iteration**, not a continuation of the same **agent session**.
+_Avoid_: "stage", "skill" (the IDE skills are the behavior spec, not the runtime unit)
 
 **Completion signal**:
 The `<promise>COMPLETE</promise>` marker in the **agent**'s output indicating all actionable tasks are finished. A pure termination signal -- carries no payload. Distinct from **structured output**.
@@ -165,8 +177,16 @@ The `.sandcastle/` directory in a **host** repo containing sandbox configuration
 _Avoid_: ".sandcastle folder", "sandcastle dir", ".sancastle"
 
 **Workflow template**:
-The self-contained agent orchestration that **init** copies into the **config directory**: the running **host** loop, **prompt template** files, the **workflow guide**, and **workflow recipes**. Distinct from a **prompt template**, which is a single **iteration**'s instruction file. Sandcastle ships two: **standard** (the default sequential implement→review loop) and **blank** (an empty canvas).
+The self-contained agent orchestration that **init** copies into the **config directory**: the running **host** loop, **prompt template** files, the **workflow guide**, and **workflow recipes**. Distinct from a **prompt template**, which is a single **iteration**'s instruction file. Sandcastle ships two: **standard** (the default sequential implement→review loop plus the **planning workflow** entry) and **blank** (an empty canvas).
 _Avoid_: 裸用「模板」 (collides with **prompt template**), "agent workflow pack", "starter", `sequential-reviewer-head` (old directory name)
+
+**Implement workflow**:
+The sequential implement→review loop on **ready tasks**. Started by `sandcastle` / `sandcastle .`. The default running loop of **standard**.
+_Avoid_: "the loop" (there are two), "RALPH loop", "execution loop"
+
+**Planning workflow**:
+The grill→spec→tickets loop on **discussion tasks**. Started by `sandcastle plan` / `sandcastle plan .`. A sibling process to the **implement workflow**, not a **workflow feature** and not the **planner** recipe.
+_Avoid_: "planner" (that recipe is plan→parallel execute→merge for implementation), "intake", "to-tickets loop"
 
 **Workflow guide**:
 The agent-facing markdown at `.sandcastle/AGENTS.md`, a sibling of the copied `main.mts`. It explains the running **workflow template** and points at **workflow recipes**. It is not the repository-root `AGENTS.md`.
