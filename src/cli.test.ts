@@ -1,6 +1,7 @@
 import { exec, execFileSync } from "node:child_process";
 import {
   access,
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -726,16 +727,30 @@ describe("sandcastle CLI", () => {
     await initRepo(hostDir);
     const binDir = await mkdtemp(join(tmpdir(), "cli-fake-gh-"));
     const logPath = join(binDir, "gh-calls.log");
-    await writeFile(
-      join(binDir, "gh.cmd"),
-      `@echo off\r\necho %* >> "${logPath}"\r\nexit /b 0\r\n`,
-    );
+    // A fake `gh` that logs its arguments and exits 0. Windows needs a
+    // .cmd wrapper; POSIX needs a shebang script (and the exec bit).
+    if (process.platform === "win32") {
+      await writeFile(
+        join(binDir, "gh.cmd"),
+        `@echo off\r\necho %* >> "%FAKE_GH_LOG%"\r\nexit /b 0\r\n`,
+      );
+    } else {
+      const scriptPath = join(binDir, "gh");
+      await writeFile(
+        scriptPath,
+        `#!/bin/sh\necho "$@" >> "$FAKE_GH_LOG"\nexit 0\n`,
+      );
+      await chmod(scriptPath, 0o755);
+    }
 
     try {
       await runCli(
         "init --agent codex --template blank --sandbox no-sandbox --issue-tracker github-issues --create-label true",
         hostDir,
-        { PATH: `${binDir}${delimiter}${process.env.PATH}` },
+        {
+          PATH: `${binDir}${delimiter}${process.env.PATH}`,
+          FAKE_GH_LOG: logPath,
+        },
       );
 
       const calls = await readFile(logPath, "utf-8");
