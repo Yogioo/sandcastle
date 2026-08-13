@@ -4,7 +4,7 @@ import { Effect, Option } from "effect";
 import * as clack from "@clack/prompts";
 import { execSync } from "node:child_process";
 import { statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { styleText } from "node:util";
 
 import { Display } from "./Display.js";
@@ -159,6 +159,84 @@ const runRegisteredProject = (
       catch: (error) =>
         new ConfigDirError({
           message: `Could not start Sandcastle project "${project.name}": ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        }),
+    });
+    yield* Effect.sync(() => {
+      process.exitCode = exitCode;
+    });
+  });
+
+/**
+ * Derive the planning entry next to the registered implement entry.
+ * Convention: sibling `plan.*` with the same extension as `main.*`.
+ */
+const planningEntryFile = (entryFile: string): string => {
+  const name = basename(entryFile);
+  const planName = name === "main.ts" ? "plan.ts" : "plan.mts";
+  return join(dirname(entryFile), planName);
+};
+
+/**
+ * Start the planning workflow entry (`plan.mts` / `plan.ts`) for a project.
+ * Same availability and touch semantics as the implement entry, but missing
+ * `plan.*` is an explicit error — never a fallback to the implement entry.
+ */
+const runPlanningProject = (
+  project: ProjectRecord,
+): Effect.Effect<void, ConfigDirError> =>
+  Effect.gen(function* () {
+    if (
+      !project.available ||
+      project.manifest === undefined ||
+      project.entryFile === undefined ||
+      project.repoDir === undefined
+    ) {
+      yield* Effect.fail(
+        new ConfigDirError({
+          message:
+            `Project "${project.name}" is unavailable: ${project.reason ?? "invalid project manifest"}. ` +
+            "Run `sandcastle init <path>` to initialize it again.",
+        }),
+      );
+    }
+
+    const planEntry = planningEntryFile(project.entryFile!);
+    const planExists = yield* Effect.sync(() => {
+      try {
+        return statSync(planEntry).isFile();
+      } catch {
+        return false;
+      }
+    });
+    if (!planExists) {
+      yield* Effect.fail(
+        new ConfigDirError({
+          message:
+            `No planning entry ${basename(planEntry)} found in "${project.stateDir}". ` +
+            "The standard template scaffolds the planning workflow next to its implement entry; " +
+            "the blank template does not. Run `sandcastle init` with --template standard, " +
+            "or create the planning entry yourself.",
+        }),
+      );
+    }
+
+    yield* Effect.tryPromise({
+      try: () => touchProject(project),
+      catch: (error) =>
+        new ConfigDirError({
+          message: `Could not update the project manifest: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        }),
+    });
+
+    const exitCode = yield* Effect.tryPromise({
+      try: () => spawnProjectRunner(planEntry, project.repoDir!),
+      catch: (error) =>
+        new ConfigDirError({
+          message: `Could not start Sandcastle planning for project "${project.name}": ${
             error instanceof Error ? error.message : String(error)
           }`,
         }),
@@ -1138,6 +1216,37 @@ const podmanCommand = Command.make("podman", {}, () =>
   Command.withSubcommands([podmanBuildImageCommand, podmanRemoveImageCommand]),
 );
 
+// --- Plan command ---
+
+/**
+ * Sibling of `sandcastle` that starts the planning workflow on discussion
+ * tasks instead of the implement workflow. Resolves the project exactly like
+ * the root command, then runs the planning entry (`plan.mts` / `plan.ts`)
+ * next to the registered `main.*` entry.
+ */
+const planCommand = Command.make(
+  "plan",
+  {
+    path: optionalRepositoryPath(),
+    stateDir: stateDirOption,
+  },
+  ({ path: repositoryPath, stateDir: stateDirFlag }) =>
+    Effect.gen(function* () {
+      const stateDir = optionValue(stateDirFlag);
+      const repository = optionValue(repositoryPath);
+      if (repository !== undefined) {
+        const project = yield* findProjectForPath(repository, stateDir);
+        yield* runPlanningProject(project);
+        return;
+      }
+
+      const project = yield* selectProject(process.cwd(), stateDir);
+      if (project !== undefined) {
+        yield* runPlanningProject(project);
+      }
+    }),
+);
+
 // --- Root command ---
 
 const rootCommand = Command.make(
@@ -1166,6 +1275,7 @@ const rootCommand = Command.make(
 export const sandcastle = rootCommand.pipe(
   Command.withSubcommands([
     initCommand,
+    planCommand,
     deleteCommand,
     pathCommand,
     dockerCommand,

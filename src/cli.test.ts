@@ -113,6 +113,157 @@ describe("sandcastle CLI", () => {
     expect(stdout).not.toContain("sync-out");
   });
 
+  it("--help shows the plan command", async () => {
+    const { stdout } = await runCli("--help", process.cwd());
+    expect(stdout).toContain("plan");
+  });
+
+  it("plan --help exposes the path argument and --state-dir", async () => {
+    const { stdout } = await runCli("plan --help", process.cwd());
+    expect(stdout).toContain("<path>");
+    expect(stdout).toContain("--state-dir");
+  });
+
+  const scaffoldBlank = async (dir: string): Promise<string> => {
+    await initRepo(dir);
+    await runCli(
+      "init --agent codex --template blank --sandbox no-sandbox --issue-tracker custom",
+      dir,
+    );
+    return defaultStateDir(dir);
+  };
+
+  it("plan . starts the planning entry, not the implement entry", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-plan-spawn-"));
+    const stateDir = await scaffoldBlank(hostDir);
+
+    try {
+      await writeFile(
+        join(stateDir, "main.mts"),
+        "console.log('IMPLEMENT_ENTRY_RAN');\n",
+      );
+      await writeFile(
+        join(stateDir, "plan.mts"),
+        "console.log('PLANNING_ENTRY_RAN');\n",
+      );
+
+      const { stdout } = await runCli("plan .", hostDir);
+      expect(stdout).toContain("PLANNING_ENTRY_RAN");
+      expect(stdout).not.toContain("IMPLEMENT_ENTRY_RAN");
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("plan without a path resolves the current directory", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-plan-cwd-"));
+    const stateDir = await scaffoldBlank(hostDir);
+
+    try {
+      await writeFile(
+        join(stateDir, "plan.mts"),
+        "console.log('PLANNING_ENTRY_RAN');\n",
+      );
+
+      const { stdout } = await runCli("plan", hostDir);
+      expect(stdout).toContain("PLANNING_ENTRY_RAN");
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("plan . starts plan.ts when the project registers main.ts", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-plan-ts-"));
+    await initRepo(hostDir);
+    await writeFile(
+      join(hostDir, "package.json"),
+      JSON.stringify({ type: "module" }),
+    );
+    const stateDir = defaultStateDir(hostDir);
+
+    try {
+      await runCli(
+        "init --agent codex --template blank --sandbox no-sandbox --issue-tracker custom",
+        hostDir,
+      );
+      await writeFile(
+        join(stateDir, "main.ts"),
+        "console.log('IMPLEMENT_ENTRY_RAN');\n",
+      );
+      await writeFile(
+        join(stateDir, "plan.ts"),
+        "console.log('PLANNING_TS_ENTRY_RAN');\n",
+      );
+
+      const { stdout } = await runCli("plan .", hostDir);
+      expect(stdout).toContain("PLANNING_TS_ENTRY_RAN");
+      expect(stdout).not.toContain("IMPLEMENT_ENTRY_RAN");
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("plan . fails with an explicit error when the planning entry is missing", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-plan-missing-"));
+    const stateDir = await scaffoldBlank(hostDir);
+
+    try {
+      await runCli("plan .", hostDir);
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      expect(output).toContain("plan.mts");
+      expect(output).toContain("standard");
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sandcastle . still starts the implement entry, not the planning entry", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-plan-implement-"));
+    const stateDir = await scaffoldBlank(hostDir);
+
+    try {
+      await writeFile(
+        join(stateDir, "main.mts"),
+        "console.log('IMPLEMENT_ENTRY_RAN');\n",
+      );
+      await writeFile(
+        join(stateDir, "plan.mts"),
+        "console.log('PLANNING_ENTRY_RAN');\n",
+      );
+
+      const { stdout } = await runCli(".", hostDir);
+      expect(stdout).toContain("IMPLEMENT_ENTRY_RAN");
+      expect(stdout).not.toContain("PLANNING_ENTRY_RAN");
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("plan . on an uninitialized repository fails with an init hint", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-plan-uninit-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli("plan .", hostDir);
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      expect(output).toContain("No initialized Sandcastle project");
+      expect(output).toContain("sandcastle init");
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
   it("docker --help shows build-image and remove-image subcommands", async () => {
     const { stdout } = await runCli("docker --help", process.cwd());
     expect(stdout).toContain("build-image");
