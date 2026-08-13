@@ -14,6 +14,7 @@ import {
   findProjectByRepo,
   inspectProjectState,
   registerProject,
+  unregisterProject,
 } from "./ProjectRegistry.js";
 
 const makeDir = () => mkdtemp(join(tmpdir(), "sandcastle-projects-"));
@@ -118,6 +119,35 @@ describe("ProjectRegistry", () => {
       await expect(
         access(join(stateDir, "project.json")),
       ).resolves.toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("unregisterProject removes state so discoverProjects no longer lists it", async () => {
+    const root = await makeDir();
+    const repoDir = join(root, "repo");
+    const projectsRoot = join(root, "projects");
+    const projectDir = join(projectsRoot, "demo");
+    const stateDir = join(projectDir, ".sandcastle");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(join(stateDir, "main.mts"), "export {};\n");
+
+    try {
+      await registerProject({
+        repoDir,
+        stateDir,
+        entryFile: "main.mts",
+      });
+      const projects = await discoverProjects({ projectsRoot });
+      expect(projects).toHaveLength(1);
+
+      await unregisterProject(projects[0]!);
+
+      expect(await discoverProjects({ projectsRoot })).toEqual([]);
+      await expect(access(stateDir)).rejects.toThrow();
+      await expect(access(projectDir)).rejects.toThrow();
     } finally {
       await rm(root, { recursive: true, force: true });
     }

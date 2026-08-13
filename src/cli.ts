@@ -39,6 +39,7 @@ import {
   touchProject,
   type ProjectRecord,
   registerProject,
+  unregisterProject,
 } from "./ProjectRegistry.js";
 import { spawnProjectRunner } from "./ProjectRunner.js";
 import type {
@@ -49,6 +50,11 @@ import type {
 import { ConfigDirError, InitError } from "./errors.js";
 import { VERSION } from "./version.js";
 import { initializeGitRepo, inspectGitRepo } from "./GitRepo.js";
+import {
+  initializeBeadsDb,
+  inspectBeadsCli,
+  inspectBeadsDb,
+} from "./BeadsRepo.js";
 
 // --- Shared options ---
 
@@ -312,7 +318,7 @@ const agentOption = Options.text("agent").pipe(
 
 const initModelOption = Options.text("model").pipe(
   Options.withDescription(
-    "Model to use for the agent (e.g. claude-sonnet-4-6). Defaults to the agent's default model",
+    "Model to pin in the scaffolded factory call (e.g. claude-sonnet-4-6). Omitted uses the agent's CLI default",
   ),
   Options.optional,
 );
@@ -368,6 +374,19 @@ const initGitOption = Options.choice("init-git", ["true", "false"]).pipe(
   Options.optional,
 );
 
+const initBeadsOption = Options.choice("init-beads", ["true", "false"]).pipe(
+  Options.withDescription(
+    "Whether to run `bd init` when the beads issue tracker is selected and no database exists",
+  ),
+  Options.optional,
+);
+
+const yesOption = Options.boolean("yes", { aliases: ["y"] }).pipe(
+  Options.withDescription(
+    "Skip the confirmation prompt and delete Sandcastle state immediately",
+  ),
+);
+
 /**
  * Translate an `Options.choice("flag", ["true", "false"]).optional` value into
  * a tri-state boolean. None when the flag was absent; otherwise the parsed bool.
@@ -391,6 +410,7 @@ const initCommand = Command.make(
     buildImage: buildImageOption,
     installTemplateDeps: installTemplateDepsOption,
     initGit: initGitOption,
+    initBeads: initBeadsOption,
     stateDir: stateDirOption,
   },
   ({
@@ -405,6 +425,7 @@ const initCommand = Command.make(
     buildImage: buildImageFlag,
     installTemplateDeps: installTemplateDepsFlag,
     initGit: initGitFlag,
+    initBeads: initBeadsFlag,
     stateDir: stateDirFlag,
   }) =>
     Effect.gen(function* () {
@@ -480,6 +501,7 @@ const initCommand = Command.make(
         installTemplateDepsFlag,
       );
       const initGitChoice = choiceToTriBool(initGitFlag);
+      const initBeadsChoice = choiceToTriBool(initBeadsFlag);
 
       const isInteractive = process.stdin.isTTY === true;
       const failIfNonInteractive = (flag: string) =>
@@ -588,11 +610,10 @@ const initCommand = Command.make(
         selectedAgent = getAgent(selected as string)!;
       }
 
-      // Resolve model: CLI flag > agent default
+      // Resolve model: CLI flag pins a model in main.mts; otherwise omit so
+      // the agent's CLI default is used (`pi()`, `claudeCode()`, …).
       const selectedModel =
-        modelFlag._tag === "Some"
-          ? modelFlag.value
-          : selectedAgent.defaultModel;
+        modelFlag._tag === "Some" ? modelFlag.value : undefined;
 
       // Resolve sandbox provider: CLI flag > interactive select (no default — user must choose)
       const sandboxProviders = listSandboxProviders();
@@ -715,6 +736,46 @@ const initCommand = Command.make(
               ),
             catch: () => undefined,
           }).pipe(Effect.ignore);
+        }
+      }
+
+      // Beads needs a host `bd` CLI and a database in the repo. Templates expand
+      // `bd ready --json` at runtime, so a missing CLI or uninitialized workspace
+      // crashes the first iteration. Mirror --init-git: require the tool, then
+      // offer to initialize, and abort init if the user declines.
+      if (selectedIssueTracker.name === "beads") {
+        if (inspectBeadsCli() === "missing") {
+          yield* Effect.fail(
+            new InitError({
+              message:
+                "The beads CLI (`bd`) was not found on PATH. Install it from https://github.com/steveyegge/beads and re-run `sandcastle init`.",
+            }),
+          );
+        }
+        if (inspectBeadsDb(cwd) !== "ready") {
+          const shouldInitBeads = yield* resolveConfirmFlag({
+            choice: initBeadsChoice,
+            flag: "--init-beads",
+            promptMessage:
+              "No beads database found in this repository. Initialize one now (`bd init`)?",
+            cancelMessage: "Beads initialization cancelled.",
+          });
+          if (!shouldInitBeads) {
+            yield* Effect.fail(
+              new InitError({
+                message:
+                  "Sandcastle with the beads issue tracker requires a beads database. Run `bd init` in the repository, then re-run `sandcastle init`.",
+              }),
+            );
+          }
+          yield* Effect.try({
+            try: () => initializeBeadsDb(cwd),
+            catch: (cause) =>
+              new InitError({
+                message: `Could not initialize beads in "${cwd}": ${cause instanceof Error ? cause.message : String(cause)}`,
+              }),
+          });
+          yield* d.status("Initialized beads database.", "success");
         }
       }
 
@@ -863,6 +924,79 @@ const initCommand = Command.make(
       for (const [i, line] of nextSteps.entries()) {
         yield* d.text(i === 0 ? line : styleText("dim", line));
       }
+    }),
+);
+
+// --- Path command ---
+
+const pathCommand = Command.make(
+  "path",
+  {
+    path: optionalRepositoryPath(),
+    stateDir: stateDirOption,
+  },
+  ({ path: repositoryPath, stateDir: stateDirFlag }) =>
+    Effect.gen(function* () {
+      const repoPath = optionValue(repositoryPath) ?? ".";
+      const stateDir = optionValue(stateDirFlag);
+      const project = yield* findProjectForPath(repoPath, stateDir);
+      yield* Effect.sync(() => {
+        console.log(project.stateDir);
+      });
+    }),
+);
+
+// --- Delete command ---
+
+const deleteCommand = Command.make(
+  "delete",
+  {
+    path: optionalRepositoryPath(),
+    stateDir: stateDirOption,
+    yes: yesOption,
+  },
+  ({ path: repositoryPath, stateDir: stateDirFlag, yes }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const repoPath = optionValue(repositoryPath) ?? ".";
+      const stateDir = optionValue(stateDirFlag);
+      const project = yield* findProjectForPath(repoPath, stateDir);
+
+      if (!yes) {
+        if (process.stdin.isTTY !== true) {
+          yield* Effect.fail(
+            new ConfigDirError({
+              message:
+                "--yes is required in non-interactive mode (no TTY detected).",
+            }),
+          );
+        }
+        const confirmed = yield* Effect.promise(() =>
+          clack.confirm({
+            message: `Delete Sandcastle state at ${project.stateDir}?`,
+            initialValue: false,
+          }),
+        );
+        if (clack.isCancel(confirmed) || confirmed !== true) {
+          yield* Effect.fail(
+            new ConfigDirError({ message: "Delete cancelled." }),
+          );
+        }
+      }
+
+      yield* Effect.tryPromise({
+        try: () => unregisterProject(project),
+        catch: (error) =>
+          new ConfigDirError({
+            message: `Could not delete Sandcastle state at "${project.stateDir}": ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          }),
+      });
+      yield* d.status(
+        `Deleted Sandcastle state at ${project.stateDir}.`,
+        "success",
+      );
     }),
 );
 
@@ -1046,7 +1180,13 @@ const rootCommand = Command.make(
 );
 
 export const sandcastle = rootCommand.pipe(
-  Command.withSubcommands([initCommand, dockerCommand, podmanCommand]),
+  Command.withSubcommands([
+    initCommand,
+    deleteCommand,
+    pathCommand,
+    dockerCommand,
+    podmanCommand,
+  ]),
 );
 
 export const cli = Command.run(sandcastle, {

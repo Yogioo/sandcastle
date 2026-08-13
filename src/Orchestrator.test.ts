@@ -1887,7 +1887,8 @@ describe("Orchestrator streaming", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(capturedCommand).toContain(`--model '${DEFAULT_MODEL}'`);
+    expect(capturedCommand).toContain(`--model ${DEFAULT_MODEL}`);
+    expect(capturedCommand).not.toContain(`--model '${DEFAULT_MODEL}'`);
   });
 
   it("uses the model from a custom provider", async () => {
@@ -1937,7 +1938,8 @@ describe("Orchestrator streaming", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(capturedCommand).toContain("--model 'claude-sonnet-4-6'");
+    expect(capturedCommand).toContain("--model claude-sonnet-4-6");
+    expect(capturedCommand).not.toContain("--model 'claude-sonnet-4-6'");
     expect(capturedCommand).not.toContain(DEFAULT_MODEL);
   });
 });
@@ -3604,7 +3606,7 @@ describe("Session capture integration", () => {
     );
 
     // The agent command should include both --resume <parent> and --fork-session.
-    expect(capturedCommand).toContain(`--resume '${parentSessionId}'`);
+    expect(capturedCommand).toContain(`--resume ${parentSessionId}`);
     expect(capturedCommand).toContain("--fork-session");
 
     // The iteration captured the CHILD session id, not the parent.

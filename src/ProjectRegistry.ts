@@ -1,6 +1,13 @@
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { realpathSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   defaultCacheRoot,
   STATE_DIR_NAME,
@@ -279,6 +286,31 @@ export const registerProject = async (
 /**
  * Update only the last-used timestamp for a registered project.
  */
+/**
+ * Remove a project's Sandcastle state directory.
+ *
+ * When the state lives at the default cache layout
+ * (`…/projects/<id>/.sandcastle`), the now-empty `<id>` folder is removed too.
+ */
+export const unregisterProject = async (
+  project: ProjectRecord,
+): Promise<void> => {
+  const stateDir = resolve(project.stateDir);
+  await rm(stateDir, { recursive: true, force: true });
+  if (basename(stateDir) !== STATE_DIR_NAME) return;
+
+  const projectDir = dirname(stateDir);
+  let remaining: string[];
+  try {
+    remaining = await readdir(projectDir);
+  } catch {
+    return;
+  }
+  if (remaining.length === 0) {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+};
+
 export const touchProject = async (
   project: ProjectRecord,
   lastUsedAt = new Date().toISOString(),

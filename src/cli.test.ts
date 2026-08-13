@@ -1,5 +1,6 @@
-import { exec } from "node:child_process";
+import { exec, execFileSync } from "node:child_process";
 import {
+  access,
   mkdir,
   mkdtemp,
   readFile,
@@ -8,9 +9,14 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+import {
+  initializeBeadsDb,
+  inspectBeadsCli,
+  inspectBeadsDb,
+} from "./BeadsRepo.js";
 import { registerProject } from "./ProjectRegistry.js";
 import { defaultStateDir } from "./StateDir.js";
 
@@ -46,12 +52,55 @@ const runCli = (
     env: { ...process.env, ...envOverrides },
   });
 
+const stdoutLines = (stdout: string): string[] =>
+  stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+const hasBd = inspectBeadsCli() === "available";
+
+/** Beads/Dolt can keep files mapped on Windows after `bd` exits. */
+const rmEventually = async (dir: string) => {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      await rm(dir, { recursive: true, force: true });
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+  }
+  await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+};
+
+/** PATH with node + git, but not `bd`, so init can still inspect the git repo. */
+const pathWithoutBd = (): string => {
+  const nodeDir = dirname(process.execPath);
+  let gitDir = "";
+  try {
+    const locator = process.platform === "win32" ? "where" : "which";
+    const gitPath = execFileSync(locator, ["git"], { encoding: "utf-8" })
+      .split(/\r?\n/)
+      .find((line) => line.trim().length > 0)
+      ?.trim();
+    if (gitPath) gitDir = dirname(gitPath);
+  } catch {
+    // git lookup failed — inspectGitRepo will also fail, which the test asserts separately
+  }
+  const system32 = process.env.SystemRoot
+    ? join(process.env.SystemRoot, "System32")
+    : "";
+  return [nodeDir, gitDir, system32].filter(Boolean).join(delimiter);
+};
+
 describe("sandcastle CLI", () => {
   it("shows help with --help flag", async () => {
     const { stdout } = await runCli("--help", process.cwd());
     expect(stdout).toContain("sandcastle");
     expect(stdout).toContain("docker");
     expect(stdout).toContain("init");
+    expect(stdout).toContain("delete");
+    expect(stdout).toContain("- path");
     expect(stdout).not.toContain("run");
     expect(stdout).not.toContain("interactive");
     // build-image and remove-image are namespaced under docker, not top-level
@@ -237,6 +286,11 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("--init-git");
   });
 
+  it("init --help exposes --init-beads", async () => {
+    const { stdout } = await runCli("init --help", process.cwd());
+    expect(stdout).toContain("--init-beads");
+  });
+
   it("init --init-git false aborts when the directory is not a git repository", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-init-git-no-"));
 
@@ -281,7 +335,7 @@ describe("sandcastle CLI", () => {
 
     try {
       const { stdout } = await runCli(
-        `init "${hostDir}" --state-dir "${stateDir}" --init-git true --agent codex --template blank --sandbox no-sandbox --issue-tracker beads`,
+        `init "${hostDir}" --state-dir "${stateDir}" --init-git true --agent codex --template blank --sandbox no-sandbox --issue-tracker github-issues --create-label false`,
         process.cwd(),
       );
 
@@ -302,7 +356,7 @@ describe("sandcastle CLI", () => {
 
     try {
       await runCli(
-        `init "${hostDir}" --state-dir "${stateDir}" --agent codex --template blank --sandbox no-sandbox --issue-tracker beads`,
+        `init "${hostDir}" --state-dir "${stateDir}" --agent codex --template blank --sandbox no-sandbox --issue-tracker github-issues --create-label false`,
         process.cwd(),
       );
 
@@ -462,7 +516,7 @@ describe("sandcastle CLI", () => {
     const stateDir = defaultStateDir(hostDir);
     try {
       const { stdout } = await runCli(
-        "init --agent codex --template blank --sandbox no-sandbox --issue-tracker beads",
+        "init --agent codex --template blank --sandbox no-sandbox --issue-tracker github-issues --create-label false",
         hostDir,
       );
 
@@ -486,7 +540,7 @@ describe("sandcastle CLI", () => {
     const stateDir = defaultStateDir(hostDir);
     try {
       const { stdout } = await runCli(
-        "init --agent claude-code --template blank --sandbox docker --issue-tracker beads --build-image false",
+        "init --agent claude-code --template blank --sandbox docker --issue-tracker github-issues --create-label false --build-image false",
         hostDir,
       );
 
@@ -552,6 +606,254 @@ describe("sandcastle CLI", () => {
       expect(entries).toContain("SETUP_ISSUE_TRACKER.md");
     } finally {
       await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("init --issue-tracker beads errors when bd is not on PATH", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-beads-no-cli-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli(
+        "init --agent codex --template blank --sandbox no-sandbox --issue-tracker beads --init-beads true",
+        hostDir,
+        { PATH: pathWithoutBd() },
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      expect(output).toContain("`bd`");
+      expect(output).toContain("PATH");
+    } finally {
+      await rmEventually(hostDir);
+    }
+  });
+
+  it.skipIf(!hasBd)(
+    "init --issue-tracker beads without --init-beads fails fast in non-interactive mode",
+    async () => {
+      const hostDir = await mkdtemp(join(tmpdir(), "cli-beads-flag-"));
+      await initRepo(hostDir);
+
+      try {
+        await runCli(
+          "init --agent codex --template blank --sandbox no-sandbox --issue-tracker beads",
+          hostDir,
+        );
+        expect.fail("Expected command to fail");
+      } catch (err: unknown) {
+        const { stdout, stderr } = err as { stdout: string; stderr: string };
+        const output = stdout + stderr;
+        expect(output).toContain("--init-beads");
+        expect(output).toContain("non-interactive");
+      } finally {
+        await rmEventually(hostDir);
+      }
+    },
+  );
+
+  it.skipIf(!hasBd)(
+    "init --init-beads false aborts when no beads database exists",
+    async () => {
+      const hostDir = await mkdtemp(join(tmpdir(), "cli-beads-no-"));
+      await initRepo(hostDir);
+
+      try {
+        await runCli(
+          "init --agent codex --template blank --sandbox no-sandbox --issue-tracker beads --init-beads false",
+          hostDir,
+        );
+        expect.fail("Expected command to fail");
+      } catch (err: unknown) {
+        const { stdout, stderr } = err as { stdout: string; stderr: string };
+        expect(stdout + stderr).toContain("requires a beads database");
+        expect(inspectBeadsDb(hostDir)).toBe("missing");
+      } finally {
+        await rmEventually(hostDir);
+      }
+    },
+  );
+
+  it.skipIf(!hasBd)(
+    "init --init-beads true initializes a beads database and scaffolds",
+    async () => {
+      const hostDir = await mkdtemp(join(tmpdir(), "cli-beads-yes-"));
+      await initRepo(hostDir);
+      const stateDir = defaultStateDir(hostDir);
+
+      try {
+        const { stdout } = await runCli(
+          "init --agent codex --template blank --sandbox no-sandbox --issue-tracker beads --init-beads true",
+          hostDir,
+        );
+
+        expect(stdout).toContain("Initialized beads database");
+        expect(stdout).toContain("Init complete");
+        expect(inspectBeadsDb(hostDir)).toBe("ready");
+      } finally {
+        await rmEventually(hostDir);
+        await rmEventually(stateDir);
+      }
+    },
+    20_000,
+  );
+
+  it.skipIf(!hasBd)(
+    "init --issue-tracker beads skips --init-beads when a database already exists",
+    async () => {
+      const hostDir = await mkdtemp(join(tmpdir(), "cli-beads-ready-"));
+      await initRepo(hostDir);
+      initializeBeadsDb(hostDir);
+      const stateDir = defaultStateDir(hostDir);
+
+      try {
+        const { stdout } = await runCli(
+          "init --agent codex --template blank --sandbox no-sandbox --issue-tracker beads",
+          hostDir,
+        );
+
+        expect(stdout).toContain("Init complete");
+        expect(stdout).not.toContain("Initialized beads database");
+      } finally {
+        await rmEventually(hostDir);
+        await rmEventually(stateDir);
+      }
+    },
+    20_000,
+  );
+
+  it("path --help exposes --state-dir", async () => {
+    const { stdout } = await runCli("path --help", process.cwd());
+    expect(stdout).toContain("--state-dir");
+  });
+
+  it("path prints the registered state directory for the current directory", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-path-cwd-"));
+    await initRepo(hostDir);
+    const stateDir = defaultStateDir(hostDir);
+
+    try {
+      await runCli(
+        "init --agent codex --template blank --sandbox no-sandbox --issue-tracker custom",
+        hostDir,
+      );
+
+      const { stdout } = await runCli("path", hostDir);
+      expect(stdoutLines(stdout)).toContain(stateDir);
+
+      const dotted = await runCli("path .", hostDir);
+      expect(stdoutLines(dotted.stdout)).toContain(stateDir);
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("path accepts a repository path from another directory", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-path-repo-"));
+    await initRepo(hostDir);
+    const stateDir = defaultStateDir(hostDir);
+
+    try {
+      await runCli(
+        "init --agent codex --template blank --sandbox no-sandbox --issue-tracker custom",
+        hostDir,
+      );
+
+      const { stdout } = await runCli(`path "${hostDir}"`, process.cwd());
+      expect(stdoutLines(stdout)).toContain(stateDir);
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("path without a registered project fails with an init hint", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-path-missing-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli("path .", hostDir);
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      expect(output).toContain("No initialized Sandcastle project");
+      expect(output).toContain("sandcastle init");
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("delete --help exposes --yes", async () => {
+    const { stdout } = await runCli("delete --help", process.cwd());
+    expect(stdout).toContain("--yes");
+  });
+
+  it("delete without a registered project fails with an init hint", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-delete-missing-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli("delete --yes", hostDir);
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      expect(output).toContain("No initialized Sandcastle project");
+      expect(output).toContain("sandcastle init");
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("delete without --yes fails fast in non-interactive mode", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-delete-flag-"));
+    await initRepo(hostDir);
+    const stateDir = defaultStateDir(hostDir);
+
+    try {
+      await runCli(
+        "init --agent codex --template blank --sandbox no-sandbox --issue-tracker custom",
+        hostDir,
+      );
+      await runCli("delete", hostDir);
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      expect(output).toContain("--yes");
+      expect(output).toContain("non-interactive");
+      await expect(
+        access(join(stateDir, "project.json")),
+      ).resolves.toBeUndefined();
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("delete --yes removes Sandcastle state for the current directory", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-delete-yes-"));
+    await initRepo(hostDir);
+    const stateDir = defaultStateDir(hostDir);
+
+    try {
+      await runCli(
+        "init --agent codex --template blank --sandbox no-sandbox --issue-tracker custom",
+        hostDir,
+      );
+      await expect(
+        access(join(stateDir, "project.json")),
+      ).resolves.toBeUndefined();
+
+      const { stdout } = await runCli("delete --yes", hostDir);
+      expect(stdout).toContain("Deleted Sandcastle state");
+      await expect(access(stateDir)).rejects.toThrow();
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+      await rm(hostDir, { recursive: true, force: true });
     }
   });
 });

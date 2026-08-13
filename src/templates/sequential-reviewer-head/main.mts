@@ -68,7 +68,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     cwd: repoDir,
     stateDir: workflowDir,
     maxIterations: 1,
-    agent: claudeCode("claude-sonnet-4-6"),
+    agent: claudeCode(),
     sandbox: docker(),
     promptFile: join(workflowDir, "implement-prompt.md"),
     branchStrategy: { type: "head" },
@@ -89,7 +89,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // -----------------------------------------------------------------------
   // Phase 2: Review
   //
-  // A second sonnet agent reviews the commit range produced by Phase 1
+  // A second agent reviews the commit range produced by Phase 1
   // (BASE_SHA..HEAD on the same tree) and either approves or makes
   // corrections directly on HEAD.
   // -----------------------------------------------------------------------
@@ -98,7 +98,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     cwd: repoDir,
     stateDir: workflowDir,
     maxIterations: 1,
-    agent: claudeCode("claude-sonnet-4-6"),
+    agent: claudeCode(),
     sandbox: docker(),
     promptFile: join(workflowDir, "review-prompt.md"),
     promptArgs: {

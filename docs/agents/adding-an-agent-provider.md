@@ -133,7 +133,7 @@ Before writing code, **verify session-ID round-trip stability empirically**: run
 
 ### Patterns to follow
 
-- **Shell-escape every interpolated value** in `buildPrintCommand` using the `shellEscape` helper at the top of `AgentProvider.ts`.
+- **Shell-escape every interpolated value** in `buildPrintCommand` using the `shellEscape` helper at the top of `AgentProvider.ts`. Safe identifiers (`claude-sonnet-4-6`, `opencode/big-pickle`) are left unquoted so Windows no-sandbox (`cmd.exe`) does not pass the quotes through to the agent. The model argument is optional — omit `--model` / `-m` when the caller does not pass one, so the agent's CLI default is used.
 - **Prefer stdin for the prompt** to dodge the argv size limit.
 - **Be defensive when parsing JSON.** Wrap `JSON.parse` in try/catch and tolerate unknown event types — CLIs add fields over time.
 - **Surface errors as `result` events** when the CLI emits them on stdout (see Codex/Pi). The Orchestrator's stderr-empty fallback uses these to show the user something useful.
@@ -150,7 +150,7 @@ For the agent to appear in `sandcastle init`, add an entry to `AGENT_REGISTRY` i
   factoryImport: "gemini",          // matches the export from index.ts
   dockerfileTemplate: GEMINI_DOCKERFILE,
   envExample: `# Google AI API key
-GOOGLE_API_KEY=`,
+# GOOGLE_API_KEY=`,
 }
 ```
 

@@ -643,7 +643,7 @@ describe("createSandbox", () => {
 
       // The second iteration's agent command must include --resume <sid>.
       expect(capturedCommands.length).toBe(2);
-      expect(capturedCommands[1]).toContain(`--resume '${mockSessionId}'`);
+      expect(capturedCommands[1]).toContain(`--resume ${mockSessionId}`);
       // Resume runs exactly one iteration.
       expect(second.iterations.length).toBe(1);
     } finally {

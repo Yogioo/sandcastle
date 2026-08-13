@@ -41,14 +41,16 @@ npm install -g @yogioo/sandcastle
 sandcastle init
 ```
 
-也可以初始化另一个仓库：`sandcastle init C:/projects/another-repo`。在 Windows 上，默认位置类似 `%LOCALAPPDATA%\Sandcastle\projects\<项目标识>\.sandcastle\`。`init` 会登记项目清单并输出实际状态目录和入口文件；若需要自定义位置，传入 `--state-dir`。
+也可以初始化另一个仓库：`sandcastle init C:/projects/another-repo`。在 Windows 上，默认位置类似 `%LOCALAPPDATA%\Sandcastle\projects\<项目标识>\.sandcastle\`。`init` 会登记项目清单并输出实际状态目录和入口文件；若需要自定义位置，传入 `--state-dir`。之后可用 `sandcastle path`（或 `sandcastle path .`）再次打印该仓库关联的状态目录。
 
 如果目标目录还不是 Git 仓库（或仓库里还没有任何 commit），`init` 会询问是否自动 `git init` 并创建一个空的初始 commit。选否会取消 `init`，等你自己处理好仓库后再跑。非交互模式用 `--init-git true|false`。
 
+如果选择 beads 作为 issue 跟踪器，`init` 会先检查宿主机是否安装了 `bd`（未安装则报错退出），再检查仓库是否已有 beads 数据库。没有数据库时会询问是否运行 `bd init`；选否会取消 `init`。非交互模式用 `--init-beads true|false`。
+
 3. `init` 会自动在输出的状态目录中创建 `.env`。如果需要自定义凭据，
-编辑该文件，填入 `CLAUDE_CODE_OAUTH_TOKEN`（在宿主机运行
-`claude setup-token` 获取）；若使用 Anthropic API Key，取消注释并填写
-`ANTHROPIC_API_KEY`。也可以使用系统环境变量或已有的 CLI 登录状态。
+   编辑该文件，填入 `CLAUDE_CODE_OAUTH_TOKEN`（在宿主机运行
+   `claude setup-token` 获取）；若使用 Anthropic API Key，取消注释并填写
+   `ANTHROPIC_API_KEY`。也可以使用系统环境变量或已有的 CLI 登录状态。
 
 4. 运行 CLI。它会使用当前仓库的已登记项目；若当前目录不是已登记项目，则显示项目选择列表：
 
@@ -64,7 +66,7 @@ import { run, claudeCode } from "@yogioo/sandcastle";
 import { docker } from "@yogioo/sandcastle/sandboxes/docker";
 
 await run({
-  agent: claudeCode("claude-opus-4-8"),
+  agent: claudeCode(), // 省略模型则使用 CLI 默认；也可传入字符串固定模型
   sandbox: docker(), // 或 podman()、vercel()、自定义提供商
   promptFile:
     "C:/Users/me/AppData/Local/Sandcastle/projects/my-project/.sandcastle/prompt.md",
@@ -449,15 +451,15 @@ if (closeResult.preservedWorktreePath) {
 
 #### `CreateSandboxOptions`
 
-| 选项             | 类型            | 默认值              | 说明                                                        |
-| ---------------- | --------------- | ------------------- | ----------------------------------------------------------- |
-| `branch`         | string          | —                   | **必填。** 沙箱使用的显式分支                               |
-| `sandbox`        | SandboxProvider | —                   | **必填。** 沙箱提供商（如 `docker()`、`podman()`）          |
-| `cwd`            | string          | `process.cwd()`     | 宿主机仓库目录——相对路径相对 `process.cwd()` 解析           |
-| `stateDir`       | string          | 用户缓存目录       | Sandcastle 状态根；可外置 `.env`、日志、worktree 与 patches |
-| `hooks`          | SandboxHooks    | —                   | 生命周期钩子（`host.*`、`sandbox.*`）——创建时执行一次       |
-| `copyToWorktree` | string[]        | —                   | 创建时复制进沙箱的、相对宿主机的文件路径                    |
-| `timeouts`       | Timeouts        | —                   | 覆盖内置生命周期超时（`copyToWorktreeMs`、`gitSetupMs` 等） |
+| 选项             | 类型            | 默认值          | 说明                                                        |
+| ---------------- | --------------- | --------------- | ----------------------------------------------------------- |
+| `branch`         | string          | —               | **必填。** 沙箱使用的显式分支                               |
+| `sandbox`        | SandboxProvider | —               | **必填。** 沙箱提供商（如 `docker()`、`podman()`）          |
+| `cwd`            | string          | `process.cwd()` | 宿主机仓库目录——相对路径相对 `process.cwd()` 解析           |
+| `stateDir`       | string          | 用户缓存目录    | Sandcastle 状态根；可外置 `.env`、日志、worktree 与 patches |
+| `hooks`          | SandboxHooks    | —               | 生命周期钩子（`host.*`、`sandbox.*`）——创建时执行一次       |
+| `copyToWorktree` | string[]        | —               | 创建时复制进沙箱的、相对宿主机的文件路径                    |
+| `timeouts`       | Timeouts        | —               | 覆盖内置生命周期超时（`copyToWorktreeMs`、`gitSetupMs` 等） |
 
 #### `Sandbox`
 
@@ -563,12 +565,12 @@ await sandbox.close();
 
 #### `CreateWorktreeOptions`
 
-| 选项             | 类型                   | 默认值              | 说明                                                                   |
-| ---------------- | ---------------------- | ------------------- | ---------------------------------------------------------------------- |
-| `branchStrategy` | WorktreeBranchStrategy | —                   | **必填。** `{ type: "branch", branch }` 或 `{ type: "merge-to-head" }` |
-| `stateDir`       | string                 | 用户缓存目录       | Sandcastle 状态根；worktree 与日志写入此目录                           |
-| `copyToWorktree` | string[]               | —                   | 创建时复制进 worktree 的、相对宿主机的文件路径                         |
-| `timeouts`       | Timeouts               | —                   | 覆盖内置生命周期超时                                                   |
+| 选项             | 类型                   | 默认值       | 说明                                                                   |
+| ---------------- | ---------------------- | ------------ | ---------------------------------------------------------------------- |
+| `branchStrategy` | WorktreeBranchStrategy | —            | **必填。** `{ type: "branch", branch }` 或 `{ type: "merge-to-head" }` |
+| `stateDir`       | string                 | 用户缓存目录 | Sandcastle 状态根；worktree 与日志写入此目录                           |
+| `copyToWorktree` | string[]               | —            | 创建时复制进 worktree 的、相对宿主机的文件路径                         |
+| `timeouts`       | Timeouts               | —            | 覆盖内置生命周期超时                                                   |
 
 #### `Worktree`
 
@@ -841,15 +843,15 @@ try {
 
 `sandcastle init` 会提示选择沙箱提供商（Docker、Podman 或不使用沙箱）、issue 跟踪器（GitHub Issues、Beads 或自定义）及模板，并将适合特定工作流的提示词与 `main.mts` 写入用户缓存状态目录。若项目 `package.json` 含 `"type": "module"`，文件名为 `main.ts`。选择 **自定义** 会生成故意未配置完成的状态，外加 `SETUP_ISSUE_TRACKER.md` 提示词，供编码代理接线你自己的跟踪器。Git 模式由模板决定（`*-head` 为直接写当前工作树；默认模板使用 worktree / `merge-to-head`）。共七种模板：
 
-| 模板                           | 说明                                                         |
-| ------------------------------ | ------------------------------------------------------------ |
-| `blank`                        | 空白脚手架——自行编写提示词与编排                             |
-| `simple-loop`                  | 逐个选取 issue 并关闭（worktree / merge-to-head）            |
-| `simple-loop-head`             | 同上，但 `branchStrategy: { type: "head" }`，无 worktree     |
-| `sequential-reviewer`          | 逐个实现 issue，每步后代码审查（独立 worktree 分支）         |
-| `sequential-reviewer-head`     | 同上，但在当前 checkout 上实现→审查；审查看本轮 commit 范围  |
-| `parallel-planner`             | 规划可并行 issue，分分支执行后合并                           |
-| `parallel-planner-with-review` | 规划可并行 issue，每分支审查后合并                           |
+| 模板                           | 说明                                                        |
+| ------------------------------ | ----------------------------------------------------------- |
+| `blank`                        | 空白脚手架——自行编写提示词与编排                            |
+| `simple-loop`                  | 逐个选取 issue 并关闭（worktree / merge-to-head）           |
+| `simple-loop-head`             | 同上，但 `branchStrategy: { type: "head" }`，无 worktree    |
+| `sequential-reviewer`          | 逐个实现 issue，每步后代码审查（独立 worktree 分支）        |
+| `sequential-reviewer-head`     | 同上，但在当前 checkout 上实现→审查；审查看本轮 commit 范围 |
+| `parallel-planner`             | 规划可并行 issue，分分支执行后合并                          |
+| `parallel-planner-with-review` | 规划可并行 issue，每分支审查后合并                          |
 
 在 `sandcastle init` 提示时选择模板，或在新仓库重新 init 尝试其他模板。使用 `--state-dir` 可以显式指定状态目录；CLI 不会因为找不到外部项目而回退到仓库内的旧 `.sandcastle`。
 
@@ -863,23 +865,26 @@ try {
 
 目标目录如果还不是 Git 仓库，或仓库里还没有任何 commit，init 会先询问是否自动创建仓库并写入一个空的初始 commit。选否会取消 init。非交互模式用 `--init-git true|false`。
 
+选择 beads 时，init 会校验宿主机 `bd` CLI 是否在 PATH 上（没有则报错），并在仓库尚未初始化 beads 数据库时询问是否运行 `bd init`。选否会取消 init。非交互模式用 `--init-beads true|false`。
+
 init 从 `packageManager` 字段或锁文件检测宿主机包管理器（npm、pnpm、yarn、bun），默认 npm。模板 `main` 若导入宿主机依赖——规划模板为 `<plan>` 输出 schema 导入 [Zod](https://zod.dev)——会在 `package.json` 中尚未存在时提示用该包管理器安装，避免首次运行缓存目录中的 `main.ts` 出现 `ERR_MODULE_NOT_FOUND`。
 
 init 的主要选项会在交互界面中选择；同时保留已有的 `--flag` 以支持 CI 和脚本。Git 模式不再作为独立交互选项——通过模板选择（`*-head` vs 默认）。stdin 非 TTY 且缺少必填 flag 时，init 快速失败并给出明确错误，而非卡在提示上。
 
-| 选项                      | 必填 | 默认值                       | 说明                                                                          |
-| ------------------------- | ---- | ---------------------------- | ----------------------------------------------------------------------------- |
-| `--image-name`            | 否   | `sandcastle:<repo-dir-name>` | Docker 镜像名                                                                 |
-| `--agent`                 | 否   | 交互提示                     | 代理（`claude-code`、`pi`、`codex`、`cursor`、`opencode`、`copilot`）         |
-| `--model`                 | 否   | 代理默认模型                 | 模型（如 `claude-sonnet-4-6`）                                                |
-| `--sandbox`               | 否   | 交互提示                     | 沙箱提供商（`docker`、`podman`、`no-sandbox`）                                |
-| `--template`              | 否   | 交互提示                     | 模板（如 `blank`、`simple-loop`、`sequential-reviewer-head`）                 |
-| `--issue-tracker`         | 否   | 交互提示                     | issue 跟踪器（`github-issues`、`beads`、`custom`）                            |
-| `--create-label`          | 否   | 交互提示                     | `true` / `false`——是否创建 `Sandcastle` GitHub 标签（仅 `github-issues`）     |
-| `--build-image`           | 否   | 交互提示                     | `true` / `false`——是否立即构建沙箱镜像（`custom` 或 `no-sandbox` 时静默忽略） |
-| `--install-template-deps` | 否   | 交互提示                     | `true` / `false`——是否安装模板宿主机依赖（如规划模板的 `zod`）                |
-| `--init-git`              | 否   | 交互提示                     | `true` / `false`——目标没有可用 Git 仓库时，是否自动 `git init` 并创建初始 commit |
-| `--state-dir`             | 否   | 用户缓存目录                 | 覆盖 Sandcastle 状态目录；CLI 不会自动回退到仓库内 `.sandcastle`              |
+| 选项                      | 必填 | 默认值                       | 说明                                                                                      |
+| ------------------------- | ---- | ---------------------------- | ----------------------------------------------------------------------------------------- |
+| `--image-name`            | 否   | `sandcastle:<repo-dir-name>` | Docker 镜像名                                                                             |
+| `--agent`                 | 否   | 交互提示                     | 代理（`claude-code`、`pi`、`codex`、`cursor`、`opencode`、`copilot`）                     |
+| `--model`                 | 否   | 省略（CLI 默认模型）         | 写入 `main.mts` 的模型（如 `claude-sonnet-4-6`）；省略则生成 `pi()` / `claudeCode()`      |
+| `--sandbox`               | 否   | 交互提示                     | 沙箱提供商（`docker`、`podman`、`no-sandbox`）                                            |
+| `--template`              | 否   | 交互提示                     | 模板（如 `blank`、`simple-loop`、`sequential-reviewer-head`）                             |
+| `--issue-tracker`         | 否   | 交互提示                     | issue 跟踪器（`github-issues`、`beads`、`custom`）                                        |
+| `--create-label`          | 否   | 交互提示                     | `true` / `false`——是否创建 `Sandcastle` GitHub 标签（仅 `github-issues`）                 |
+| `--build-image`           | 否   | 交互提示                     | `true` / `false`——是否立即构建沙箱镜像（`custom` 或 `no-sandbox` 时静默忽略）             |
+| `--install-template-deps` | 否   | 交互提示                     | `true` / `false`——是否安装模板宿主机依赖（如规划模板的 `zod`）                            |
+| `--init-git`              | 否   | 交互提示                     | `true` / `false`——目标没有可用 Git 仓库时，是否自动 `git init` 并创建初始 commit          |
+| `--init-beads`            | 否   | 交互提示                     | `true` / `false`——选择 beads 且仓库没有数据库时，是否自动 `bd init`（未安装 `bd` 则报错） |
+| `--state-dir`             | 否   | 用户缓存目录                 | 覆盖 Sandcastle 状态目录；CLI 不会自动回退到仓库内 `.sandcastle`                          |
 
 默认在用户缓存状态目录创建以下文件：
 
@@ -888,12 +893,45 @@ init 的主要选项会在交互界面中选择；同时保留已有的 `--flag`
 ├── Dockerfile      # 沙箱环境（使用 no-sandbox 时不会生成）
 ├── main.ts         # 代理工作流入口（非 ESM 项目为 main.mts）
 ├── prompt.md       # 代理说明
-├── .env.example    # 令牌占位符
+├── .env            # 令牌占位（默认注释，取消注释后填写）
 ├── .dockerignore   # 防止凭据和运行时文件进入构建上下文
 └── .gitignore      # 忽略 .env、logs/、worktrees/、patches/
 ```
 
 若 `.sandcastle/` 已存在会报错，防止覆盖自定义内容。
+
+### `sandcastle path`
+
+打印当前目录（或指定仓库）已登记的 Sandcastle 状态目录，便于打开并编辑工作流文件（`main.ts`、`prompt.md`、`.env` 等）。成功时只在 stdout 输出一行路径，可直接复制或交给脚本使用。
+
+```bash
+sandcastle path
+sandcastle path .
+sandcastle path C:/projects/another-repo
+```
+
+| 选项          | 必填 | 默认值     | 说明                 |
+| ------------- | ---- | ---------- | -------------------- |
+| `path`        | 否   | 当前目录   | 要查询状态的仓库路径 |
+| `--state-dir` | 否   | 已登记位置 | 显式指定状态目录     |
+
+若该仓库尚未 `init`，命令会失败并提示先运行 `sandcastle init`。
+
+### `sandcastle delete`
+
+删除当前目录（或指定仓库）已登记的 Sandcastle 状态目录，便于重新 `init`。默认删用户缓存中的项目状态，不改仓库源码。交互模式会确认；非交互模式必须加 `--yes`。
+
+```bash
+sandcastle delete
+sandcastle delete --yes
+sandcastle delete C:/projects/another-repo --yes
+```
+
+| 选项           | 必填 | 默认值     | 说明                 |
+| -------------- | ---- | ---------- | -------------------- |
+| `path`         | 否   | 当前目录   | 要删除状态的仓库路径 |
+| `--state-dir`  | 否   | 已登记位置 | 显式指定状态目录     |
+| `--yes` / `-y` | 否   | 交互确认   | 跳过确认并立即删除   |
 
 ### `sandcastle docker build-image`
 
@@ -937,7 +975,7 @@ init 的主要选项会在交互界面中选择；同时保留已有的 `--flag`
 | -------------------------- | ------------------ | ----------------------------- | ------------------------------------------------------------------------------------ |
 | `agent`                    | AgentProvider      | —                             | **必填。** 代理提供商（如 `claudeCode(...)`、`codex(...)`、`cursor(...)` 等）        |
 | `sandbox`                  | SandboxProvider    | —                             | **必填。** 沙箱提供商                                                                |
-| `cwd`                      | string             | `process.cwd()`               | 宿主机仓库目录——Git 操作的锚点；Sandcastle 状态由 `stateDir` 管理                   |
+| `cwd`                      | string             | `process.cwd()`               | 宿主机仓库目录——Git 操作的锚点；Sandcastle 状态由 `stateDir` 管理                    |
 | `stateDir`                 | string             | 用户缓存目录                  | Sandcastle 状态根：`.env`、日志、worktree 与 patches                                 |
 | `prompt`                   | string             | —                             | 内联提示词（与 `promptFile` 互斥）                                                   |
 | `promptFile`               | string             | —                             | 提示词文件路径。相对 `process.cwd()`，**非** `cwd`                                   |
@@ -1058,10 +1096,12 @@ const [reviewA, reviewB] = await Promise.all([
 
 ### `ClaudeCodeOptions`
 
-`claudeCode()` 工厂可选第二参数：
+`claudeCode()` 工厂的模型字符串可选；省略则不传 `--model`，由 Claude Code CLI 自己选默认模型。也可只传 options：
 
 ```typescript
+agent: claudeCode();
 agent: claudeCode("claude-opus-4-8", { effort: "high" });
+agent: claudeCode({ effort: "high" });
 ```
 
 | 选项              | 类型                                                                                           | 默认值 | 说明                                                                                        |
@@ -1073,10 +1113,12 @@ agent: claudeCode("claude-opus-4-8", { effort: "high" });
 
 ### `CodexOptions`
 
-`codex()` 工厂可选第二参数：
+`codex()` 工厂的模型字符串可选；省略则不传 `-m`，由 Codex CLI 自己选默认模型。也可只传 options：
 
 ```typescript
+agent: codex();
 agent: codex("gpt-5.4", { effort: "high" });
+agent: codex({ effort: "high" });
 ```
 
 | 选项                | 类型                                           | 默认值 | 说明                                                                          |
@@ -1088,10 +1130,12 @@ agent: codex("gpt-5.4", { effort: "high" });
 
 ### `PiOptions`
 
-`pi()` 工厂可选第二参数：
+`pi()` 工厂的模型字符串可选；省略则不传 `--model`，由 Pi CLI 自己选默认模型。也可只传 options：
 
 ```typescript
+agent: pi();
 agent: pi("claude-sonnet-4-6", { thinking: "high" });
+agent: pi({ thinking: "high" });
 ```
 
 | 选项              | 类型                                                                     | 默认值 | 说明                                        |

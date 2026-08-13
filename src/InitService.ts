@@ -214,7 +214,7 @@ export interface AgentEntry {
   readonly defaultModel: string;
   readonly factoryImport: string;
   readonly dockerfileTemplate: string;
-  /** Lines to include in the generated `.env.example` for this agent's API key. */
+  /** Lines to include in the generated `.env` for this agent's API key. */
   readonly envExample: string;
   /**
    * Copy-pasteable interactive command that feeds the custom-issue-tracker
@@ -436,7 +436,7 @@ const AGENT_REGISTRY: AgentEntry[] = [
     dockerfileTemplate: CLAUDE_CODE_DOCKERFILE,
     envExample: `# Claude Code OAuth token — get one by running \`claude setup-token\` on your host.
 # Lets the agent use your Claude subscription instead of an API key.
-CLAUDE_CODE_OAUTH_TOKEN=
+# CLAUDE_CODE_OAUTH_TOKEN=
 # Or use an Anthropic API key instead — uncomment and fill in:
 # ANTHROPIC_API_KEY=`,
     setupCommand: `claude "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
@@ -448,7 +448,7 @@ CLAUDE_CODE_OAUTH_TOKEN=
     factoryImport: "pi",
     dockerfileTemplate: PI_DOCKERFILE,
     envExample: `# Anthropic API key
-ANTHROPIC_API_KEY=`,
+# ANTHROPIC_API_KEY=`,
     setupCommand: `pi "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
   },
   {
@@ -458,7 +458,7 @@ ANTHROPIC_API_KEY=`,
     factoryImport: "codex",
     dockerfileTemplate: CODEX_DOCKERFILE,
     envExample: `# OpenAI API key
-OPENAI_KEY=`,
+# OPENAI_KEY=`,
     setupCommand: `codex "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
   },
   {
@@ -469,7 +469,7 @@ OPENAI_KEY=`,
     dockerfileTemplate: CURSOR_DOCKERFILE,
     envExample: `# Cursor API key (recommended)
 # You can also pass --api-key directly to the agent CLI.
-CURSOR_API_KEY=`,
+# CURSOR_API_KEY=`,
     setupCommand: `agent "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
   },
   {
@@ -479,7 +479,7 @@ CURSOR_API_KEY=`,
     factoryImport: "opencode",
     dockerfileTemplate: OPENCODE_DOCKERFILE,
     envExample: `# OpenCode API key
-OPENCODE_API_KEY=`,
+# OPENCODE_API_KEY=`,
     setupCommand: `opencode --prompt "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
   },
   {
@@ -491,7 +491,7 @@ OPENCODE_API_KEY=`,
     envExample: `# GitHub token with the "Copilot Requests" permission
 # (a fine-grained PAT, or any token from \`gh auth login\`).
 # COPILOT_GITHUB_TOKEN takes precedence over GH_TOKEN and GITHUB_TOKEN.
-GITHUB_TOKEN=`,
+# GITHUB_TOKEN=`,
     setupCommand: `copilot -i "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
   },
 ];
@@ -511,7 +511,7 @@ export interface IssueTrackerEntry {
     readonly CLOSE_TASK_COMMAND: string;
     readonly ISSUE_TRACKER_TOOLS: string;
   };
-  /** Lines to append to `.env.example` for this issue tracker, or empty string if none needed. */
+  /** Lines to append to `.env` for this issue tracker, or empty string if none needed. */
   readonly envExample: string;
 }
 
@@ -561,7 +561,7 @@ const ISSUE_TRACKER_REGISTRY: IssueTrackerEntry[] = [
     envExample: `# GitHub personal access token — the agent uses it to read and manage GitHub Issues
 # Create a fine-grained token: https://github.com/settings/personal-access-tokens/new
 # Required repository permissions: Issues (Read and write) and Metadata (Read)
-GH_TOKEN=`,
+# GH_TOKEN=`,
   },
   {
     name: "beads",
@@ -729,7 +729,7 @@ export function getNextStepsLines(
     let step = 1;
     const lines: string[] = [
       "Next steps:",
-      `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
+      `${step++}. Uncomment and set the required env vars in .sandcastle/.env`,
     ];
     if (agent.name === "claude-code") {
       lines.push(
@@ -759,7 +759,7 @@ export function getNextStepsLines(
     let step = 1;
     const lines: string[] = [
       "Next steps:",
-      `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
+      `${step++}. Uncomment and set the required env vars in .sandcastle/.env`,
     ];
     if (agent.name === "claude-code") {
       lines.push(
@@ -825,6 +825,19 @@ const getTemplateDir = (
     return join(getTemplatesDir(), templateName);
   });
 
+/** Comment out KEY=VALUE lines so the scaffolded `.env` is inert until filled in. */
+const commentEnvAssignments = (content: string): string =>
+  content
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("=")) {
+        return line;
+      }
+      return `# ${trimmed}`;
+    })
+    .join("\n");
+
 const COMPILED_FILE_EXTENSIONS = [
   ".js",
   ".js.map",
@@ -851,7 +864,6 @@ const copyTemplateFiles = (
         .filter(
           (f) =>
             f !== "template.json" &&
-            f !== ".env.example" &&
             !COMPILED_FILE_EXTENSIONS.some((ext) => f.endsWith(ext)),
         )
         .map((f) => {
@@ -870,11 +882,13 @@ const copyTemplateFiles = (
  * Templates use `claudeCode` as the default agent factory and `docker` as the
  * default sandbox provider. When a different agent, model, or sandbox provider
  * is selected, this function rewrites the imports and factory calls.
+ * An omitted `model` leaves factory calls as `pi()` / `claudeCode()` so the
+ * agent's CLI default is used.
  */
 const rewriteMainTs = (
   configDir: string,
   agent: AgentEntry,
-  model: string,
+  model: string | undefined,
   sandboxProvider: SandboxProviderEntry,
   mainFilename: string,
   useWorktree: boolean,
@@ -900,18 +914,29 @@ const rewriteMainTs = (
     }
 
     // Replace factory function name in imports (e.g. claudeCode → pi)
-    // and all factory calls with the correct model.
-    // Templates always use claudeCode as the placeholder factory.
+    // and all factory calls. Templates always use claudeCode as the
+    // placeholder factory, with no model so the CLI default is used.
     content = content.replace(/\bclaudeCode\b/g, agent.factoryImport);
-    // Replace model strings in factory calls: factoryImport("any-model")
-    const factoryCallRe = new RegExp(
+    const factoryCallWithModelRe = new RegExp(
       `${agent.factoryImport}\\(["']([^"']+)["']\\)`,
       "g",
     );
-    content = content.replace(
-      factoryCallRe,
-      `${agent.factoryImport}("${model}")`,
-    );
+    const factoryCallEmptyRe = new RegExp(`${agent.factoryImport}\\(\\)`, "g");
+    if (model) {
+      content = content.replace(
+        factoryCallWithModelRe,
+        `${agent.factoryImport}("${model}")`,
+      );
+      content = content.replace(
+        factoryCallEmptyRe,
+        `${agent.factoryImport}("${model}")`,
+      );
+    } else {
+      content = content.replace(
+        factoryCallWithModelRe,
+        `${agent.factoryImport}()`,
+      );
+    }
 
     // Replace the sandbox provider. Templates always import docker() as the
     // placeholder — rewrite the import path and every docker() call site.
@@ -1163,7 +1188,7 @@ ${
 
   with your **list** command. In the prompt file the sentinel sits inside a Sandcastle **shell expression** — a leading \`!\` followed by the command in backticks — whose output is injected into the prompt before each run. Keep that \`!\` and the surrounding backticks; replace only the command between them, and **remove the \`exit 1\`** (leaving it keeps every run hard-failing). Then replace the \`${CUSTOM_VIEW_TASK_MARKER}\` and \`${CUSTOM_CLOSE_TASK_MARKER}\` markers with your **view** and **close** commands.
 
-- **\`.env.example\`** — replace the \`# TODO\` block with the real env var(s) your tracker needs, then tell the user to set them in \`.sandcastle/.env\`.
+- **\`.env\`** — replace the \`# TODO\` block with the real env var(s) your tracker needs, commented out until filled in.
 
 ${
   cliNamespace
@@ -1191,7 +1216,8 @@ Run your **list** command on the host and confirm it returns the open tasks as J
 
 export interface ScaffoldOptions {
   agent: AgentEntry;
-  model: string;
+  /** When set, factory calls are rewritten to `pi("model")`. Omitted uses the CLI default (`pi()`). */
+  model?: string;
   templateName?: string;
   createLabel?: boolean;
   issueTracker?: IssueTrackerEntry;
@@ -1285,12 +1311,12 @@ export const scaffold = (
 
     const templateDir = yield* getTemplateDir(templateName);
 
-    // Build .env.example from agent + issue tracker env blocks
-    const envExampleParts = [agent.envExample];
+    // Build .env from agent + issue tracker env blocks, with keys commented out
+    const envParts = [agent.envExample];
     if (issueTracker.envExample) {
-      envExampleParts.push(issueTracker.envExample);
+      envParts.push(issueTracker.envExample);
     }
-    const envExampleContent = envExampleParts.join("\n") + "\n";
+    const envContent = commentEnvAssignments(envParts.join("\n") + "\n");
 
     const scaffoldFiles: Effect.Effect<void, Error, FileSystem.FileSystem>[] = [
       fs
@@ -1300,10 +1326,7 @@ export const scaffold = (
         .writeFileString(join(configDir, ".dockerignore"), DOCKERIGNORE)
         .pipe(Effect.mapError((e) => new Error(e.message))),
       fs
-        .writeFileString(join(configDir, ".env.example"), envExampleContent)
-        .pipe(Effect.mapError((e) => new Error(e.message))),
-      fs
-        .writeFileString(join(configDir, ".env"), envExampleContent)
+        .writeFileString(join(configDir, ".env"), envContent)
         .pipe(Effect.mapError((e) => new Error(e.message))),
       copyTemplateFiles(templateDir, configDir, mainFilename),
     ];

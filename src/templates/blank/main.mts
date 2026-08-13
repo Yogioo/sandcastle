@@ -13,7 +13,7 @@ const workflowDir = fileURLToPath(new URL(".", import.meta.url));
 await run({
   cwd: repoDir,
   stateDir: workflowDir,
-  agent: claudeCode("claude-opus-4-8"),
+  agent: claudeCode(),
   sandbox: docker(),
   promptFile: join(workflowDir, "prompt.md"),
 });

@@ -47,10 +47,30 @@ describe("claudeCode factory", () => {
     expect(stdin).toBe("do something");
   });
 
-  it("buildPrintCommand shell-escapes the model", () => {
+  it("buildPrintCommand leaves a safe model identifier unquoted", () => {
     const provider = claudeCode("claude-opus-4-8");
     const { command } = provider.buildPrintCommand(opts("do something"));
-    expect(command).toContain("--model 'claude-opus-4-8'");
+    expect(command).toContain("--model claude-opus-4-8");
+    expect(command).not.toContain("--model 'claude-opus-4-8'");
+  });
+
+  it("buildPrintCommand shell-escapes an unsafe model identifier", () => {
+    const provider = claudeCode("model; rm -rf /");
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("--model 'model; rm -rf /'");
+  });
+
+  it("buildPrintCommand omits --model when no model is given", () => {
+    const provider = claudeCode();
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).not.toContain("--model");
+  });
+
+  it("accepts options without a model", () => {
+    const provider = claudeCode({ effort: "high" });
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).not.toContain("--model");
+    expect(command).toContain("--effort high");
   });
 
   it("parseStreamLine extracts text from assistant message", () => {
@@ -201,7 +221,7 @@ describe("claudeCode factory", () => {
       dangerouslySkipPermissions: true,
       resumeSession: "abc-123",
     });
-    expect(command).toContain("--resume 'abc-123'");
+    expect(command).toContain("--resume abc-123");
   });
 
   it("buildPrintCommand omits --resume when resumeSession is not set", () => {
@@ -221,7 +241,7 @@ describe("claudeCode factory", () => {
       resumeSession: "abc-123",
       forkSession: true,
     });
-    expect(command).toContain("--resume 'abc-123'");
+    expect(command).toContain("--resume abc-123");
     expect(command).toContain("--fork-session");
   });
 
@@ -246,7 +266,7 @@ describe("claudeCode factory", () => {
       resumeSession: "abc-123",
       forkSession: false,
     });
-    expect(command).toContain("--resume 'abc-123'");
+    expect(command).toContain("--resume abc-123");
     expect(command).not.toContain("--fork-session");
   });
 
@@ -363,9 +383,9 @@ describe("pi factory", () => {
       dangerouslySkipPermissions: true,
       resumeSession: "abc-123",
     });
-    expect(command).toContain("--session 'abc-123'");
+    expect(command).toContain("--session abc-123");
     expect(command).toContain("--mode json");
-    expect(command).toContain("--model 'claude-sonnet-4-6'");
+    expect(command).toContain("--model claude-sonnet-4-6");
     expect(command).toContain("--thinking high");
     expect(stdin).toBe("continue");
   });
@@ -387,10 +407,30 @@ describe("pi factory", () => {
     expect(stdin).toBe("it's a test");
   });
 
-  it("buildPrintCommand shell-escapes the model", () => {
+  it("buildPrintCommand leaves a safe model identifier unquoted", () => {
     const provider = pi("claude-sonnet-4-6");
     const { command } = provider.buildPrintCommand(opts("do something"));
-    expect(command).toContain("--model 'claude-sonnet-4-6'");
+    expect(command).toContain("--model claude-sonnet-4-6");
+    expect(command).not.toContain("--model 'claude-sonnet-4-6'");
+  });
+
+  it("buildPrintCommand shell-escapes an unsafe model identifier", () => {
+    const provider = pi("model; rm -rf /");
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("--model 'model; rm -rf /'");
+  });
+
+  it("buildPrintCommand omits --model when no model is given", () => {
+    const provider = pi();
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).not.toContain("--model");
+  });
+
+  it("accepts options without a model", () => {
+    const provider = pi({ thinking: "high" });
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).not.toContain("--model");
+    expect(command).toContain("--thinking high");
   });
 
   it("parseStreamLine extracts text from message_update event", () => {
@@ -686,6 +726,19 @@ describe("codex factory", () => {
     expect(command).toContain("-m 'model; rm -rf /'");
   });
 
+  it("buildPrintCommand omits -m when no model is given", () => {
+    const provider = codex();
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).not.toContain(" -m ");
+  });
+
+  it("accepts options without a model", () => {
+    const provider = codex({ effort: "high" });
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).not.toContain(" -m ");
+    expect(command).toContain(`-c 'model_reasoning_effort="high"'`);
+  });
+
   it("buildPrintCommand includes model reasoning effort config when specified", () => {
     const provider = codex("gpt-5.4-mini", { effort: "high" });
     const { command } = provider.buildPrintCommand(opts("do something"));
@@ -699,7 +752,7 @@ describe("codex factory", () => {
       dangerouslySkipPermissions: true,
       resumeSession: "abc-123",
     });
-    expect(command).toContain("codex exec resume 'abc-123'");
+    expect(command).toContain("codex exec resume abc-123");
     expect(command).toContain("--json");
     expect(command).toContain("-m gpt-5.4-mini");
     expect(command).toContain(`-c 'model_reasoning_effort="high"'`);
@@ -715,7 +768,7 @@ describe("codex factory", () => {
       resumeSession: "abc-123",
       forkSession: true,
     });
-    expect(command).toContain("codex exec fork 'abc-123'");
+    expect(command).toContain("codex exec fork abc-123");
     expect(command).not.toContain("codex exec resume");
     expect(command).toContain("--json");
     expect(command).toContain("-m gpt-5.4-mini");
@@ -731,7 +784,7 @@ describe("codex factory", () => {
       resumeSession: "abc-123",
       forkSession: false,
     });
-    expect(command).toContain("codex exec resume 'abc-123'");
+    expect(command).toContain("codex exec resume abc-123");
     expect(command).not.toContain("codex exec fork");
   });
 
@@ -1041,7 +1094,13 @@ describe("cursor factory", () => {
     expect(command).toContain("--print");
     expect(command).toContain("--output-format stream-json");
     expect(command).toContain("--force");
-    expect(command).toContain("--model 'claude-sonnet-4-6'");
+    expect(command).toContain("--model claude-sonnet-4-6");
+  });
+
+  it("buildPrintCommand omits --model when no model is given", () => {
+    const provider = cursor();
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).not.toContain("--model");
   });
 
   it("buildPrintCommand passes prompt as a positional shell-escaped argument", () => {
@@ -1248,16 +1307,23 @@ describe("opencode factory", () => {
     expect(command).toContain("'it'\\''s a test'");
   });
 
-  it("buildPrintCommand shell-escapes the model", () => {
+  it("buildPrintCommand leaves a slash-containing model identifier unquoted", () => {
     const provider = opencode("opencode/big-pickle");
     const { command } = provider.buildPrintCommand(opts("do something"));
-    expect(command).toContain("--model 'opencode/big-pickle'");
+    expect(command).toContain("--model opencode/big-pickle");
+    expect(command).not.toContain("--model 'opencode/big-pickle'");
+  });
+
+  it("buildPrintCommand omits --model when no model is given", () => {
+    const provider = opencode();
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).not.toContain("--model");
   });
 
   it("buildPrintCommand includes --variant when specified", () => {
     const provider = opencode("opencode/big-pickle", { variant: "high" });
     const { command } = provider.buildPrintCommand(opts("do something"));
-    expect(command).toContain("--variant 'high'");
+    expect(command).toContain("--variant high");
   });
 
   it("buildPrintCommand omits --variant when not specified", () => {
@@ -1292,7 +1358,7 @@ describe("opencode factory", () => {
   it("buildPrintCommand includes --agent when specified", () => {
     const provider = opencode("opencode/big-pickle", { agent: "build" });
     const { command } = provider.buildPrintCommand(opts("do something"));
-    expect(command).toContain("--agent 'build'");
+    expect(command).toContain("--agent build");
   });
 
   it("buildPrintCommand omits --agent when not specified", () => {
@@ -1591,7 +1657,7 @@ describe("resumeSession on non-Claude providers", () => {
       dangerouslySkipPermissions: true,
       resumeSession: "abc-123",
     });
-    expect(command).toContain("--session 'abc-123'");
+    expect(command).toContain("--session abc-123");
   });
 
   it("codex uses resumeSession in buildPrintCommand", () => {
@@ -1601,7 +1667,7 @@ describe("resumeSession on non-Claude providers", () => {
       dangerouslySkipPermissions: true,
       resumeSession: "abc-123",
     });
-    expect(command).toContain("codex exec resume 'abc-123'");
+    expect(command).toContain("codex exec resume abc-123");
   });
 
   it("opencode ignores resumeSession in buildPrintCommand", () => {
@@ -1647,8 +1713,14 @@ describe("copilot factory", () => {
     const { command } = provider.buildPrintCommand(opts("do something"));
     expect(command).toContain("copilot -p");
     expect(command).toContain("'do something'");
-    expect(command).toContain("--model 'claude-sonnet-4.5'");
+    expect(command).toContain("--model claude-sonnet-4.5");
     expect(command).toContain("--output-format json");
+  });
+
+  it("buildPrintCommand omits --model when no model is given", () => {
+    const provider = copilot();
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).not.toContain("--model");
   });
   it("buildPrintCommand includes --allow-all-tools when dangerouslySkipPermissions is true", () => {
     const provider = copilot("claude-sonnet-4.5");

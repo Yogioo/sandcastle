@@ -38,10 +38,38 @@ export type ParsedStreamEvent =
   | { type: "session_id"; sessionId: string }
   | { type: "usage"; usage: IterationUsage };
 
-const shellEscape = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
+/**
+ * Identifiers that are safe unquoted in both POSIX `sh -c` and Windows
+ * `cmd.exe`. Includes `/` so models like `opencode/big-pickle` stay
+ * unquoted; excludes cmd.exe/sh metacharacters (`& | < > ^ % ! ; " ' space`).
+ */
+const SAFE_SHELL_ARG = /^[A-Za-z0-9._/+-]+$/;
 
-const shellEscapeModel = (model: string): string =>
-  /^[A-Za-z0-9._-]+$/.test(model) ? model : shellEscape(model);
+/**
+ * Quote a value interpolated into a POSIX `sh -c` command string.
+ *
+ * Safe identifiers are left unquoted so the same command also works on
+ * Windows no-sandbox, which runs through cmd.exe. cmd.exe does not treat
+ * single quotes as quoting, so `'claude-sonnet-4-6'` would be forwarded
+ * to the agent as a literal model name including the quotes.
+ */
+const shellEscape = (s: string): string =>
+  SAFE_SHELL_ARG.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'";
+
+const splitFactoryArgs = <T extends object>(
+  modelOrOptions?: string | T,
+  options?: T,
+): { model: string | undefined; options: T | undefined } => {
+  if (typeof modelOrOptions === "string") {
+    return { model: modelOrOptions, options };
+  }
+  return { model: undefined, options: modelOrOptions };
+};
+
+const printModelFlag = (
+  flag: "--model" | "-m",
+  model: string | undefined,
+): string => (model ? ` ${flag} ${shellEscape(model)}` : "");
 
 /** Maps allowlisted tool names to the input field containing the display arg */
 const TOOL_ARG_FIELDS: Record<string, string> = {
@@ -629,43 +657,47 @@ export interface PiOptions {
 }
 
 export const pi = (
-  model: string,
-  options?: PiOptions,
-): AgentProvider & { readonly sessionStorage: AgentSessionStorage } => ({
-  name: "pi",
-  env: options?.env ?? {},
-  captureSessions: options?.captureSessions ?? true,
-  sessionStorage: makePiSessionStorage(options),
+  modelOrOptions?: string | PiOptions,
+  maybeOptions?: PiOptions,
+): AgentProvider & { readonly sessionStorage: AgentSessionStorage } => {
+  const { model, options } = splitFactoryArgs(modelOrOptions, maybeOptions);
+  return {
+    name: "pi",
+    env: options?.env ?? {},
+    captureSessions: options?.captureSessions ?? true,
+    sessionStorage: makePiSessionStorage(options),
 
-  buildPrintCommand({
-    prompt,
-    resumeSession,
-  }: AgentCommandOptions): PrintCommand {
-    const thinkingFlag = options?.thinking
-      ? ` --thinking ${options.thinking}`
-      : "";
-    // Pi persists print-mode sessions by default; `--session <id>` resolves an
-    // existing session and appends to it in place. Drop the legacy
-    // `--no-session` flag so fresh runs also persist and can be resumed later.
-    const sessionFlag = resumeSession
-      ? ` --session ${shellEscape(resumeSession)}`
-      : "";
-    return {
-      command: `pi -p --mode json --model ${shellEscape(model)}${thinkingFlag}${sessionFlag}`,
-      stdin: prompt,
-    };
-  },
+    buildPrintCommand({
+      prompt,
+      resumeSession,
+    }: AgentCommandOptions): PrintCommand {
+      const thinkingFlag = options?.thinking
+        ? ` --thinking ${options.thinking}`
+        : "";
+      // Pi persists print-mode sessions by default; `--session <id>` resolves an
+      // existing session and appends to it in place. Drop the legacy
+      // `--no-session` flag so fresh runs also persist and can be resumed later.
+      const sessionFlag = resumeSession
+        ? ` --session ${shellEscape(resumeSession)}`
+        : "";
+      return {
+        command: `pi -p --mode json${printModelFlag("--model", model)}${thinkingFlag}${sessionFlag}`,
+        stdin: prompt,
+      };
+    },
 
-  buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
-    const args = ["pi", "--model", model];
-    if (prompt) args.push(prompt);
-    return args;
-  },
+    buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
+      const args = ["pi"];
+      if (model) args.push("--model", model);
+      if (prompt) args.push(prompt);
+      return args;
+    },
 
-  parseStreamLine(line: string): ParsedStreamEvent[] {
-    return parsePiStreamLine(line);
-  },
-});
+    parseStreamLine(line: string): ParsedStreamEvent[] {
+      return parsePiStreamLine(line);
+    },
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Codex agent provider
@@ -774,19 +806,21 @@ export interface CodexOptions {
 }
 
 export const codex = (
-  model: string,
-  options?: CodexOptions,
-): AgentProvider & { readonly sessionStorage: AgentSessionStorage } => ({
-  name: "codex",
-  env: options?.env ?? {},
-  captureSessions: options?.captureSessions ?? true,
-  sessionStorage: makeCodexSessionStorage(options),
+  modelOrOptions?: string | CodexOptions,
+  maybeOptions?: CodexOptions,
+): AgentProvider & { readonly sessionStorage: AgentSessionStorage } => {
+  const { model, options } = splitFactoryArgs(modelOrOptions, maybeOptions);
+  return {
+    name: "codex",
+    env: options?.env ?? {},
+    captureSessions: options?.captureSessions ?? true,
+    sessionStorage: makeCodexSessionStorage(options),
 
-  buildPrintCommand({
-    prompt,
-    resumeSession,
-    forkSession,
-  }: AgentCommandOptions): PrintCommand {
+    buildPrintCommand({
+      prompt,
+      resumeSession,
+      forkSession,
+    }: AgentCommandOptions): PrintCommand {
     const effortFlag = options?.effort
       ? ` -c ${shellEscape(`model_reasoning_effort="${options.effort}"`)}`
       : "";
@@ -813,13 +847,14 @@ export const codex = (
     // stdin marker is present, including for a fresh session.
     const stdinArg = " -";
     return {
-      command: `${base} --json${approvalsFlags} -m ${shellEscapeModel(model)}${effortFlag}${stdinArg}`,
+      command: `${base} --json${approvalsFlags}${printModelFlag("-m", model)}${effortFlag}${stdinArg}`,
       stdin: prompt,
     };
   },
 
   buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
-    const args = ["codex", "--model", model];
+    const args = ["codex"];
+    if (model) args.push("--model", model);
     if (prompt) args.push(prompt);
     return args;
   },
@@ -827,7 +862,8 @@ export const codex = (
   parseStreamLine(line: string): ParsedStreamEvent[] {
     return parseCodexStreamLine(line);
   },
-});
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Cursor agent provider
@@ -840,12 +876,14 @@ export interface CursorOptions {
 }
 
 export const cursor = (
-  model: string,
-  options?: CursorOptions,
-): AgentProvider => ({
-  name: "cursor",
-  env: options?.env ?? {},
-  captureSessions: false,
+  modelOrOptions?: string | CursorOptions,
+  maybeOptions?: CursorOptions,
+): AgentProvider => {
+  const { model, options } = splitFactoryArgs(modelOrOptions, maybeOptions);
+  return {
+    name: "cursor",
+    env: options?.env ?? {},
+    captureSessions: false,
 
   // Cursor has no filesystem-backed session storage (captureSessions: false, no
   // sessionStorage), so it is non-resumable per ADR 0012/0016. resumeSession is
@@ -858,7 +896,7 @@ export const cursor = (
     const forceFlag = dangerouslySkipPermissions ? " --force" : "";
 
     return {
-      command: `agent --print --output-format stream-json --model ${shellEscape(model)} ${forceFlag} ${shellEscape(prompt)}`,
+      command: `agent --print --output-format stream-json${printModelFlag("--model", model)}${forceFlag} ${shellEscape(prompt)}`,
     };
   },
 
@@ -866,7 +904,8 @@ export const cursor = (
     prompt,
     dangerouslySkipPermissions,
   }: AgentCommandOptions): string[] {
-    const args = ["agent", "--model", model];
+    const args = ["agent"];
+    if (model) args.push("--model", model);
     if (dangerouslySkipPermissions) args.push("--force");
     if (prompt) args.push(prompt);
     return args;
@@ -875,7 +914,8 @@ export const cursor = (
   parseStreamLine(line: string): ParsedStreamEvent[] {
     return parseCursorStreamLine(line);
   },
-});
+  };
+};
 
 // ---------------------------------------------------------------------------
 // OpenCode agent provider
@@ -962,12 +1002,14 @@ export interface OpenCodeOptions {
 }
 
 export const opencode = (
-  model: string,
-  options?: OpenCodeOptions,
-): AgentProvider => ({
-  name: "opencode",
-  env: options?.env ?? {},
-  captureSessions: false,
+  modelOrOptions?: string | OpenCodeOptions,
+  maybeOptions?: OpenCodeOptions,
+): AgentProvider => {
+  const { model, options } = splitFactoryArgs(modelOrOptions, maybeOptions);
+  return {
+    name: "opencode",
+    env: options?.env ?? {},
+    captureSessions: false,
 
   buildPrintCommand({
     prompt,
@@ -983,12 +1025,13 @@ export const opencode = (
       ? " --dangerously-skip-permissions"
       : "";
     return {
-      command: `opencode run --format json --model ${shellEscape(model)}${variantFlag}${agentFlag}${permissionsFlag} ${shellEscape(prompt)}`,
+      command: `opencode run --format json${printModelFlag("--model", model)}${variantFlag}${agentFlag}${permissionsFlag} ${shellEscape(prompt)}`,
     };
   },
 
   buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
-    const args = ["opencode", "--model", model];
+    const args = ["opencode"];
+    if (model) args.push("--model", model);
     if (options?.agent) args.push("--agent", options.agent);
     // The TUI's seed-prompt flag is `--prompt` (long form only); `-p` is the
     // `opencode run`/`attach` basic-auth password flag, not a prompt seed.
@@ -1000,7 +1043,8 @@ export const opencode = (
   parseStreamLine(line: string): ParsedStreamEvent[] {
     return parseOpenCodeStreamLine(line);
   },
-});
+  };
+};
 
 // ---------------------------------------------------------------------------
 // GitHub Copilot CLI agent provider
@@ -1112,12 +1156,14 @@ export interface CopilotOptions {
 }
 
 export const copilot = (
-  model: string,
-  options?: CopilotOptions,
-): AgentProvider => ({
-  name: "copilot",
-  env: options?.env ?? {},
-  captureSessions: false,
+  modelOrOptions?: string | CopilotOptions,
+  maybeOptions?: CopilotOptions,
+): AgentProvider => {
+  const { model, options } = splitFactoryArgs(modelOrOptions, maybeOptions);
+  return {
+    name: "copilot",
+    env: options?.env ?? {},
+    captureSessions: false,
 
   // Copilot CLI does expose `--resume <id>`, but its session state is indexed by
   // a SQLite database alongside the JSONL files in ~/.copilot/session-state/, so
@@ -1133,12 +1179,13 @@ export const copilot = (
     const allowAll = dangerouslySkipPermissions ? " --allow-all-tools" : "";
     const effortFlag = options?.effort ? ` --effort ${options.effort}` : "";
     return {
-      command: `copilot -p ${shellEscape(prompt)} --output-format json --model ${shellEscape(model)}${allowAll}${effortFlag}`,
+      command: `copilot -p ${shellEscape(prompt)} --output-format json${printModelFlag("--model", model)}${allowAll}${effortFlag}`,
     };
   },
 
   buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
-    const args = ["copilot", "--model", model];
+    const args = ["copilot"];
+    if (model) args.push("--model", model);
     // Seed the interactive session with `-i`/`--interactive`, NOT `-p`. The
     // `-p`/`--prompt` flag runs the prompt programmatically and exits after
     // completion; since interactive() attaches these args to the real TTY,
@@ -1151,7 +1198,8 @@ export const copilot = (
   parseStreamLine(line: string): ParsedStreamEvent[] {
     return parseCopilotStreamLine(line);
   },
-});
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Claude Code agent provider
@@ -1184,13 +1232,15 @@ export interface ClaudeCodeOptions {
 }
 
 export const claudeCode = (
-  model: string,
-  options?: ClaudeCodeOptions,
-): AgentProvider & { readonly sessionStorage: AgentSessionStorage } => ({
-  name: "claude-code",
-  env: options?.env ?? {},
-  captureSessions: options?.captureSessions ?? true,
-  sessionStorage: makeClaudeSessionStorage(options),
+  modelOrOptions?: string | ClaudeCodeOptions,
+  maybeOptions?: ClaudeCodeOptions,
+): AgentProvider & { readonly sessionStorage: AgentSessionStorage } => {
+  const { model, options } = splitFactoryArgs(modelOrOptions, maybeOptions);
+  return {
+    name: "claude-code",
+    env: options?.env ?? {},
+    captureSessions: options?.captureSessions ?? true,
+    sessionStorage: makeClaudeSessionStorage(options),
 
   buildPrintCommand({
     prompt,
@@ -1215,7 +1265,7 @@ export const claudeCode = (
     // resumed one. See ADR 0018.
     const forkFlag = resumeSession && forkSession ? " --fork-session" : "";
     return {
-      command: `claude --print --verbose${permissionFlag} --output-format stream-json --model ${shellEscape(model)}${effortFlag}${resumeFlag}${forkFlag} -p -`,
+      command: `claude --print --verbose${permissionFlag} --output-format stream-json${printModelFlag("--model", model)}${effortFlag}${resumeFlag}${forkFlag} -p -`,
       stdin: prompt,
     };
   },
@@ -1230,7 +1280,7 @@ export const claudeCode = (
     } else if (dangerouslySkipPermissions) {
       args.push("--dangerously-skip-permissions");
     }
-    args.push("--model", model);
+    if (model) args.push("--model", model);
     if (options?.effort) args.push("--effort", options.effort);
     if (prompt) args.push(prompt);
     return args;
@@ -1269,4 +1319,5 @@ export const claudeCode = (
     }
     return undefined;
   },
-});
+  };
+};
