@@ -399,6 +399,13 @@ describe("InitService scaffold", () => {
 
     const { access } = await import("node:fs/promises");
     await expect(access(join(configDir, "main.mts"))).resolves.toBeUndefined();
+    await expect(access(join(configDir, "plan.mts"))).rejects.toThrow();
+    await expect(access(join(configDir, "plan.ts"))).rejects.toThrow();
+    await expect(access(join(configDir, "grill-prompt.md"))).rejects.toThrow();
+    await expect(access(join(configDir, "spec-prompt.md"))).rejects.toThrow();
+    await expect(
+      access(join(configDir, "tickets-prompt.md")),
+    ).rejects.toThrow();
   });
 
   it("blank template main.mts imports from @yogioo/sandcastle", async () => {
@@ -556,7 +563,9 @@ describe("InitService scaffold", () => {
       expect(readme).toContain(
         'gh issue close <ID> --comment "Completed by Sandcastle"',
       );
-      expect(readme).toContain("bd ready --json");
+      expect(readme).toContain(
+        "bd ready --exclude-label needs-planning --json",
+      );
       expect(readme).toContain(
         'bd close <ID> --reason="Completed by Sandcastle"',
       );
@@ -689,6 +698,87 @@ describe("InitService scaffold", () => {
       await expect(
         access(join(configDir, "CODING_STANDARDS.md")),
       ).resolves.toBeUndefined();
+    });
+
+    it("scaffolds a planning entry and grill/spec/tickets prompts", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "standard" });
+
+      const configDir = join(dir, ".sandcastle");
+      await expect(
+        access(join(configDir, "plan.mts")),
+      ).resolves.toBeUndefined();
+      await expect(
+        access(join(configDir, "grill-prompt.md")),
+      ).resolves.toBeUndefined();
+      await expect(
+        access(join(configDir, "spec-prompt.md")),
+      ).resolves.toBeUndefined();
+      await expect(
+        access(join(configDir, "tickets-prompt.md")),
+      ).resolves.toBeUndefined();
+    });
+
+    it("renames the planning entry to plan.ts for ESM projects", async () => {
+      const dir = await makeDir();
+      await writeFile(
+        join(dir, "package.json"),
+        JSON.stringify({ type: "module" }),
+      );
+      await runScaffold(dir, { templateName: "standard" });
+
+      const configDir = join(dir, ".sandcastle");
+      await expect(access(join(configDir, "plan.ts"))).resolves.toBeUndefined();
+      await expect(access(join(configDir, "plan.mts"))).rejects.toThrow();
+
+      const plan = await readFile(join(configDir, "plan.ts"), "utf-8");
+      expect(plan).not.toContain("plan.mts");
+    });
+
+    it("rewrites agent factory and sandbox provider in the planning entry", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "standard",
+        agent: piAgent,
+        sandboxProvider: getSandboxProvider("no-sandbox")!,
+      });
+
+      const plan = await readFile(
+        join(dir, ".sandcastle", "plan.mts"),
+        "utf-8",
+      );
+      expect(plan).toContain(
+        'import { noSandbox } from "@yogioo/sandcastle/sandboxes/no-sandbox"',
+      );
+      expect(plan).not.toContain('from "@yogioo/sandcastle/sandboxes/docker"');
+      expect(plan).toContain("pi(");
+      expect(plan).not.toContain("claudeCode");
+    });
+
+    it("substitutes the issue tracker list command in the planning entry", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "standard" });
+
+      const plan = await readFile(
+        join(dir, ".sandcastle", "plan.mts"),
+        "utf-8",
+      );
+      expect(plan).toContain("gh issue list");
+      expect(plan).not.toContain("{{LIST_TASKS_COMMAND}}");
+    });
+
+    it("planning entry shares the implement entry's issue tracker list", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "standard",
+        issueTracker: getIssueTracker("beads"),
+      });
+
+      const plan = await readFile(
+        join(dir, ".sandcastle", "plan.mts"),
+        "utf-8",
+      );
+      expect(plan).toContain("bd ready --exclude-label needs-planning --json");
     });
 
     it("main.mts uses run() with head strategy and no createSandbox({ branch })", async () => {
@@ -1238,7 +1328,9 @@ describe("InitService scaffold", () => {
       const manager = getIssueTracker("beads");
       expect(manager).toBeDefined();
       expect(manager!.label).toBe("Beads");
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toBe("bd ready --json");
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toBe(
+        "bd ready --exclude-label needs-planning --json",
+      );
       expect(manager!.templateArgs.VIEW_TASK_COMMAND).toContain("bd show");
       expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain("bd close");
       expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain("--reason=");
@@ -1285,6 +1377,16 @@ describe("InitService scaffold", () => {
       );
       expect(manager!.envExample).toContain("TODO");
       expect(manager!.envExample).toContain("SETUP_ISSUE_TRACKER.md");
+    });
+
+    it("github-issues implement list stays Sandcastle-only", () => {
+      const manager = getIssueTracker("github-issues");
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+        "--label Sandcastle",
+      );
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).not.toContain(
+        "needs-planning",
+      );
     });
 
     it("listIssueTrackers includes custom", () => {
@@ -1359,7 +1461,9 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "implement-prompt.md"),
         "utf-8",
       );
-      expect(prompt).toContain("bd ready --json");
+      expect(prompt).toContain(
+        "bd ready --exclude-label needs-planning --json",
+      );
       expect(prompt).toContain("bd close");
       expect(prompt).not.toContain("gh issue list");
       expect(prompt).not.toContain("gh issue close");
@@ -1582,7 +1686,9 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain("bd ready --json");
+      expect(mainTs).toContain(
+        "bd ready --exclude-label needs-planning --json",
+      );
       expect(mainTs).not.toContain("{{LIST_TASKS_COMMAND}}");
       expect(mainTs).not.toContain("gh issue list");
     });
@@ -1615,7 +1721,9 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "prompt.md"),
         "utf-8",
       );
-      expect(prompt).toContain("bd ready --json");
+      expect(prompt).toContain(
+        "bd ready --exclude-label needs-planning --json",
+      );
       expect(prompt).not.toContain("gh issue");
       expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
     });
@@ -1648,7 +1756,9 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "recipes", "planner", "plan-prompt.md"),
         "utf-8",
       );
-      expect(planPrompt).toContain("bd ready --json");
+      expect(planPrompt).toContain(
+        "bd ready --exclude-label needs-planning --json",
+      );
       expect(planPrompt).not.toContain("{{LIST_TASKS_COMMAND}}");
     });
 

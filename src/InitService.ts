@@ -561,7 +561,7 @@ const ISSUE_TRACKER_REGISTRY: IssueTrackerEntry[] = [
     name: "beads",
     label: "Beads",
     templateArgs: {
-      LIST_TASKS_COMMAND: "bd ready --json",
+      LIST_TASKS_COMMAND: "bd ready --exclude-label needs-planning --json",
       VIEW_TASK_COMMAND: "bd show <ID>",
       CLOSE_TASK_COMMAND: `bd close <ID> --reason="Completed by Sandcastle"`,
       ISSUE_TRACKER_TOOLS: BEADS_TOOLS,
@@ -868,6 +868,7 @@ const copyTemplateFiles = (
   templateDir: string,
   destDir: string,
   mainFilename: string,
+  planFilename: string,
   isRoot = true,
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
@@ -887,10 +888,21 @@ const copyTemplateFiles = (
               yield* fs
                 .makeDirectory(destSub, { recursive: true })
                 .pipe(Effect.mapError((e) => new Error(e.message)));
-              yield* copyTemplateFiles(src, destSub, mainFilename, false);
+              yield* copyTemplateFiles(
+                src,
+                destSub,
+                mainFilename,
+                planFilename,
+                false,
+              );
               return;
             }
-            const destName = isRoot && f === "main.mts" ? mainFilename : f;
+            const destName =
+              isRoot && f === "main.mts"
+                ? mainFilename
+                : isRoot && f === "plan.mts"
+                  ? planFilename
+                  : f;
             yield* fs
               .copyFile(src, join(destDir, destName))
               .pipe(Effect.mapError((e) => new Error(e.message)));
@@ -916,14 +928,15 @@ const rewriteMainTsContent = (
   sandboxProvider: SandboxProviderEntry,
   sandboxExpression: string,
   useWorktree: boolean,
-  rewriteFilenameRefs: boolean,
+  filenameRefs?: ReadonlyArray<{ from: string; to: string }>,
 ): string => {
   let next = content;
 
-  // Templates use main.mts as the canonical filename in comments.
-  // When the target is main.ts, rewrite those references in the root entry.
-  if (rewriteFilenameRefs) {
-    next = next.replace(/main\.mts/g, "main.ts");
+  // Templates use main.mts / plan.mts as the canonical filenames in
+  // comments. When the root entry was renamed (main.ts / plan.ts), rewrite
+  // those references in that entry.
+  for (const ref of filenameRefs ?? []) {
+    next = next.replaceAll(ref.from, ref.to);
   }
 
   // Replace factory function name in imports (e.g. claudeCode → pi)
@@ -977,7 +990,12 @@ const rewriteMainTs = (
     const files = yield* listFilesRecursive(configDir);
     const mainFiles = files.filter((path) => {
       const name = basenameOf(path);
-      return name === "main.ts" || name === "main.mts";
+      return (
+        name === "main.ts" ||
+        name === "main.mts" ||
+        name === "plan.ts" ||
+        name === "plan.mts"
+      );
     });
     if (mainFiles.length === 0) return;
 
@@ -989,7 +1007,11 @@ const rewriteMainTs = (
         ? `${sandboxProvider.factoryName}({ mounts: [{ hostPath: join(workflowDir, "CODING_STANDARDS.md"), sandboxPath: ".sandcastle/CODING_STANDARDS.md", readonly: true }] })`
         : `${sandboxProvider.factoryName}()`;
 
+    const planFilename = mainFilename.replace(/^main\./, "plan.");
     const rootMainPath = join(configDir, mainFilename);
+    const rootPlanPath = join(configDir, planFilename);
+    const sameFile = (left: string, right: string): boolean =>
+      left.replace(/\\/g, "/") === right.replace(/\\/g, "/");
 
     yield* Effect.all(
       mainFiles.map((mainTsPath) =>
@@ -1003,6 +1025,18 @@ const rewriteMainTs = (
             .readFileString(mainTsPath)
             .pipe(Effect.mapError((e) => new Error(e.message)));
 
+          const isRootMain = sameFile(mainTsPath, rootMainPath);
+          const isRootPlan = sameFile(mainTsPath, rootPlanPath);
+          const filenameRefs =
+            isRootMain && mainFilename === "main.ts"
+              ? [{ from: "main.mts", to: "main.ts" }]
+              : isRootPlan && planFilename === "plan.ts"
+                ? [
+                    { from: "plan.mts", to: "plan.ts" },
+                    { from: "main.mts", to: "main.ts" },
+                  ]
+                : undefined;
+
           const updated = rewriteMainTsContent(
             content,
             agent,
@@ -1010,9 +1044,7 @@ const rewriteMainTs = (
             sandboxProvider,
             sandboxExpression,
             useWorktree,
-            mainFilename === "main.ts" &&
-              mainTsPath.replace(/\\/g, "/") ===
-                rootMainPath.replace(/\\/g, "/"),
+            filenameRefs,
           );
 
           yield* fs
@@ -1343,6 +1375,7 @@ export const scaffold = (
     }
 
     const mainFilename = yield* detectMainFilename(repoDir);
+    const planFilename = mainFilename.replace(/^main\./, "plan.");
 
     yield* fs
       .makeDirectory(configDir, { recursive: true })
@@ -1367,7 +1400,7 @@ export const scaffold = (
       fs
         .writeFileString(join(configDir, ".env"), envContent)
         .pipe(Effect.mapError((e) => new Error(e.message))),
-      copyTemplateFiles(templateDir, configDir, mainFilename),
+      copyTemplateFiles(templateDir, configDir, mainFilename, planFilename),
     ];
 
     if (sandboxProvider.containerfileName) {

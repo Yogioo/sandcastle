@@ -21,7 +21,7 @@ The tracker commands are baked into the scaffolded files — there is no runtime
 | Tracker | List | View | Close | Container tools | `.env` |
 | --- | --- | --- | --- | --- | --- |
 | **github-issues** | `gh issue list --state open --label Sandcastle --limit 100 --json number,title,body,labels,comments --jq '[.[] \| {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'` | `gh issue view <ID>` | `gh issue close <ID> --comment "Completed by Sandcastle"` | GitHub CLI via apt (keyring + `apt-get install -y gh`) | `GH_TOKEN` — fine-grained PAT with Issues (read/write) and Metadata (read) |
-| **beads** | `bd ready --json` | `bd show <ID>` | `bd close <ID> --reason="Completed by Sandcastle"` | system deps (dpkg-dev, libicu72 + .74 symlink), `curl …/beads/install.sh \| bash`, `corepack enable` | none |
+| **beads** | `bd ready --exclude-label needs-planning --json` | `bd show <ID>` | `bd close <ID> --reason="Completed by Sandcastle"` | system deps (dpkg-dev, libicu72 + .74 symlink), `curl …/beads/install.sh \| bash`, `corepack enable` | none |
 | **custom** | sentinel: `echo 'No issue tracker configured — run .sandcastle/SETUP_ISSUE_TRACKER.md through your coding agent.' >&2; exit 1` | `<view command — see .sandcastle/SETUP_ISSUE_TRACKER.md>` | `<close command — see .sandcastle/SETUP_ISSUE_TRACKER.md>` | `# TODO: install your issue tracker's CLI here. See .sandcastle/SETUP_ISSUE_TRACKER.md` | `# TODO: add any env vars your issue tracker needs` |
 
 ## Switching to custom
