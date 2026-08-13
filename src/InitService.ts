@@ -501,6 +501,7 @@ export interface IssueTrackerEntry {
   readonly label: string;
   readonly templateArgs: {
     readonly LIST_TASKS_COMMAND: string;
+    readonly LIST_PLANNING_TASKS_COMMAND: string;
     readonly VIEW_TASK_COMMAND: string;
     readonly CLOSE_TASK_COMMAND: string;
     readonly ISSUE_TRACKER_TOOLS: string;
@@ -536,6 +537,7 @@ RUN corepack enable`;
 // and replaces these markers in place (see SETUP_ISSUE_TRACKER.md). Defined as
 // shared constants so the registry entry and the setup doc stay in sync.
 const CUSTOM_LIST_TASKS_SENTINEL = `echo 'No issue tracker configured — run ${SETUP_ISSUE_TRACKER_PATH} through your coding agent.' >&2; exit 1`;
+const CUSTOM_LIST_PLANNING_TASKS_SENTINEL = `echo 'No planning list configured — run ${SETUP_ISSUE_TRACKER_PATH} through your coding agent.' >&2; exit 1`;
 const CUSTOM_VIEW_TASK_MARKER = `<view command — see ${SETUP_ISSUE_TRACKER_PATH}>`;
 const CUSTOM_CLOSE_TASK_MARKER = `<close command — see ${SETUP_ISSUE_TRACKER_PATH}>`;
 const CUSTOM_TRACKER_TOOLS = `# TODO: install your issue tracker's CLI here. See ${SETUP_ISSUE_TRACKER_PATH}`;
@@ -548,6 +550,7 @@ const ISSUE_TRACKER_REGISTRY: IssueTrackerEntry[] = [
     label: "GitHub Issues",
     templateArgs: {
       LIST_TASKS_COMMAND: `gh issue list --state open --label Sandcastle --limit 100 --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
+      LIST_PLANNING_TASKS_COMMAND: `gh issue list --state open --label needs-planning --label -planned --limit 100 --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
       VIEW_TASK_COMMAND: "gh issue view <ID>",
       CLOSE_TASK_COMMAND: `gh issue close <ID> --comment "Completed by Sandcastle"`,
       ISSUE_TRACKER_TOOLS: GITHUB_CLI_TOOLS,
@@ -562,6 +565,8 @@ const ISSUE_TRACKER_REGISTRY: IssueTrackerEntry[] = [
     label: "Beads",
     templateArgs: {
       LIST_TASKS_COMMAND: "bd ready --exclude-label needs-planning --json",
+      LIST_PLANNING_TASKS_COMMAND:
+        "bd list --label needs-planning --exclude-label planned",
       VIEW_TASK_COMMAND: "bd show <ID>",
       CLOSE_TASK_COMMAND: `bd close <ID> --reason="Completed by Sandcastle"`,
       ISSUE_TRACKER_TOOLS: BEADS_TOOLS,
@@ -576,6 +581,7 @@ const ISSUE_TRACKER_REGISTRY: IssueTrackerEntry[] = [
       // non-zero exit and surfaces stderr, so this is the single enforcement
       // point that keeps the scaffold broken until the user configures it.
       LIST_TASKS_COMMAND: CUSTOM_LIST_TASKS_SENTINEL,
+      LIST_PLANNING_TASKS_COMMAND: CUSTOM_LIST_PLANNING_TASKS_SENTINEL,
       // Inline text markers — replaced by the setup agent, never executed.
       VIEW_TASK_COMMAND: CUSTOM_VIEW_TASK_MARKER,
       CLOSE_TASK_COMMAND: CUSTOM_CLOSE_TASK_MARKER,
@@ -1413,13 +1419,15 @@ export const scaffold = (
           .pipe(Effect.mapError((e) => new Error(e.message))),
       );
     }
-    if (stateDir && mainFilename === "main.ts") {
-      scaffoldFiles.push(
-        fs
-          .writeFileString(join(configDir, "package.json"), MODULE_PACKAGE_JSON)
-          .pipe(Effect.mapError((e) => new Error(e.message))),
-      );
-    }
+    // The config directory always ships its own `type: module` package.json.
+    // Template helpers with a .ts extension (logs.ts, probe.ts) are imported
+    // from the ESM entry; without it, tsx treats them as CJS in repos that
+    // have no package.json (or `type: commonjs`) and the named imports fail.
+    scaffoldFiles.push(
+      fs
+        .writeFileString(join(configDir, "package.json"), MODULE_PACKAGE_JSON)
+        .pipe(Effect.mapError((e) => new Error(e.message))),
+    );
 
     yield* Effect.all(scaffoldFiles, { concurrency: "unbounded" });
 

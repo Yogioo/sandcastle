@@ -185,6 +185,33 @@ describe("InitService scaffold", () => {
     );
   });
 
+  it("writes a type-module package.json in the config directory so .ts helpers load as ESM", async () => {
+    // No repo package.json at all → main.mts. The template's .ts helpers
+    // (logs.ts, probe.ts) are imported from the ESM entry; without
+    // "type": "module" in the config directory tsx treats them as CJS and
+    // the named imports fail.
+    const repoDir = await makeDir();
+    await runScaffold(repoDir, { templateName: "standard" });
+
+    const pkg = await readFile(
+      join(repoDir, ".sandcastle", "package.json"),
+      "utf-8",
+    );
+    expect(pkg).toContain('"type": "module"');
+  });
+
+  it("writes a type-module package.json in an external state dir without a repo package.json", async () => {
+    const repoDir = await makeDir();
+    const stateDir = join(repoDir, "cache", ".sandcastle");
+
+    const result = await runScaffold(repoDir, { stateDir });
+
+    expect(result.mainFilename).toBe("main.mts");
+    expect(await readFile(join(stateDir, "package.json"), "utf-8")).toContain(
+      '"type": "module"',
+    );
+  });
+
   it("uses agent dockerfileTemplate for Dockerfile (with templateArgs substitution)", async () => {
     const dir = await makeDir();
     await runScaffold(dir);
@@ -767,7 +794,7 @@ describe("InitService scaffold", () => {
       expect(plan).not.toContain("{{LIST_TASKS_COMMAND}}");
     });
 
-    it("planning entry shares the implement entry's issue tracker list", async () => {
+    it("planning entry uses the planning list, not the implement list", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
         templateName: "standard",
@@ -778,7 +805,76 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "plan.mts"),
         "utf-8",
       );
-      expect(plan).toContain("bd ready --exclude-label needs-planning --json");
+      expect(plan).toContain("bd list --label needs-planning");
+      expect(plan).not.toContain("bd ready");
+    });
+
+    it("plan.mts runs exactly one planning phase per iteration", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "standard" });
+
+      const plan = await readFile(
+        join(dir, ".sandcastle", "plan.mts"),
+        "utf-8",
+      );
+      expect(plan).toContain("probePlanningPhase");
+      expect(plan).toContain("while (iteration < MAX_ITERATIONS)");
+      // Phase isolation: one run() call site, phase selects the prompt —
+      // never a single session invoking two skills.
+      expect(plan.match(/await run\(/g)).toHaveLength(1);
+      expect(plan).toContain("name: phase");
+    });
+
+    it("plan.mts idles on wait before starting any agent, without burning iterations", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "standard" });
+
+      const plan = await readFile(
+        join(dir, ".sandcastle", "plan.mts"),
+        "utf-8",
+      );
+      // Waiting on a human → idle poll (no sandbox) before the run site,
+      // and the wait branch never consumes the iteration budget.
+      const waitStart = plan.indexOf('phase === "wait"');
+      const iterationStart = plan.indexOf("iteration += 1");
+      const runStart = plan.indexOf("await run(");
+      expect(waitStart).toBeLessThan(runStart);
+      expect(waitStart).toBeLessThan(iterationStart);
+      const waitBlock = plan.slice(waitStart, iterationStart);
+      expect(waitBlock).toContain("sleep");
+      expect(waitBlock).toContain("continue");
+      expect(waitBlock).not.toContain("await run(");
+      expect(waitBlock.indexOf("sleep")).toBeLessThan(
+        waitBlock.indexOf("continue"),
+      );
+    });
+
+    it("plan.mts substitutes the planning list command for github-issues", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "standard" });
+
+      const plan = await readFile(
+        join(dir, ".sandcastle", "plan.mts"),
+        "utf-8",
+      );
+      expect(plan).toContain("--label needs-planning");
+      expect(plan).toContain("-planned");
+      expect(plan).not.toContain("{{LIST_PLANNING_TASKS_COMMAND}}");
+    });
+
+    it("plan.mts lists discussion tasks with beads via bd list --label needs-planning", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "standard",
+        issueTracker: getIssueTracker("beads"),
+      });
+
+      const plan = await readFile(
+        join(dir, ".sandcastle", "plan.mts"),
+        "utf-8",
+      );
+      expect(plan).toContain("bd list --label needs-planning");
+      expect(plan).not.toContain("{{LIST_PLANNING_TASKS_COMMAND}}");
     });
 
     it("main.mts uses run() with head strategy and no createSandbox({ branch })", async () => {
