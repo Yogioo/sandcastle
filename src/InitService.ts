@@ -480,7 +480,7 @@ export const listAgents = (): AgentEntry[] => AGENT_REGISTRY;
  * so a "Default model: ..." hint would be misleading.
  */
 export const agentSelectOptions = (
-  agents: AgentEntry[],
+  agents: ReadonlyArray<AgentEntry>,
 ): { value: string; label: string }[] =>
   agents.map((a) => ({ value: a.name, label: a.label }));
 

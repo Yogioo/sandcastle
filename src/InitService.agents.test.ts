@@ -83,15 +83,14 @@ describe("Agent registry", () => {
   });
 
   it("agentSelectOptions returns value/label pairs with no default-model hint", () => {
-    const options = agentSelectOptions(listAgents());
-    expect(options.length).toBe(listAgents().length);
+    const agents = listAgents();
+    const options = agentSelectOptions(agents);
+    expect(options).toHaveLength(agents.length);
     for (const option of options) {
-      // The model is optional now (omitted -> agent CLI's own default),
-      // so no "Default model: ..." hint may be shown.
-      expect(option).not.toHaveProperty("hint");
       const entry = getAgent(option.value);
       expect(entry).toBeDefined();
-      expect(option.label).toBe(entry!.label);
+      // toEqual rejects extra properties, so this also guards the no-hint contract.
+      expect(option).toEqual({ value: entry!.name, label: entry!.label });
     }
   });
 
