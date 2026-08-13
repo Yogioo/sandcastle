@@ -20,6 +20,7 @@ import type {
 } from "./InitService.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import { SKELETON_PROMPT } from "./templates.js";
+import { AGENT_COMMENT_MARKER } from "./templates/standard/probe.js";
 
 const makeDir = () => mkdtemp(join(tmpdir(), "init-service-"));
 
@@ -877,6 +878,55 @@ describe("InitService scaffold", () => {
       expect(plan).not.toContain("{{LIST_PLANNING_TASKS_COMMAND}}");
     });
 
+    it("grill-prompt.md drives the async grilling protocol over issue comments", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "standard" });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "grill-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("gh issue comment");
+      expect(prompt).toContain("gh issue edit");
+      expect(prompt).toContain("aligned");
+      expect(prompt).toContain(AGENT_COMMENT_MARKER);
+      expect(prompt).not.toContain("{{COMMENT_ON_TASK_COMMAND}}");
+      expect(prompt).not.toContain("{{ADD_LABEL_COMMAND}}");
+    });
+
+    it("spec-prompt.md posts the spec as a comment and labels the task specced", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "standard" });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "spec-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("gh issue comment");
+      expect(prompt).toContain("specced");
+      expect(prompt).toContain(AGENT_COMMENT_MARKER);
+      expect(prompt).not.toContain("{{COMMENT_ON_TASK_COMMAND}}");
+      expect(prompt).not.toContain("{{ADD_LABEL_COMMAND}}");
+    });
+
+    it("tickets-prompt.md creates child ready tasks and leaves the parent open", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "standard" });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "tickets-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("gh issue create");
+      expect(prompt).toContain("--label Sandcastle");
+      expect(prompt).toContain("planned");
+      expect(prompt).toContain("open");
+      expect(prompt).toContain(AGENT_COMMENT_MARKER);
+      expect(prompt).not.toContain("{{CREATE_TASK_COMMAND}}");
+      expect(prompt).not.toContain("{{COMMENT_ON_TASK_COMMAND}}");
+      expect(prompt).not.toContain("{{ADD_LABEL_COMMAND}}");
+    });
+
     it("main.mts uses run() with head strategy and no createSandbox({ branch })", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "standard" });
@@ -1338,6 +1388,21 @@ describe("InitService scaffold", () => {
     );
     expect(prompt).not.toContain("--label Sandcastle");
     expect(prompt).toContain("gh issue list");
+  });
+
+  it("tickets-prompt.md strips --label Sandcastle when createLabel is false", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      templateName: "standard",
+      createLabel: false,
+    });
+
+    const prompt = await readFile(
+      join(dir, ".sandcastle", "tickets-prompt.md"),
+      "utf-8",
+    );
+    expect(prompt).not.toContain("--label Sandcastle");
+    expect(prompt).toContain("gh issue create");
   });
 
   it("standard main.mts strips --label Sandcastle when createLabel is false", async () => {

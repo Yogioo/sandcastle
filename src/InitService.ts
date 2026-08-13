@@ -504,6 +504,9 @@ export interface IssueTrackerEntry {
     readonly LIST_PLANNING_TASKS_COMMAND: string;
     readonly VIEW_TASK_COMMAND: string;
     readonly CLOSE_TASK_COMMAND: string;
+    readonly COMMENT_ON_TASK_COMMAND: string;
+    readonly ADD_LABEL_COMMAND: string;
+    readonly CREATE_TASK_COMMAND: string;
     readonly ISSUE_TRACKER_TOOLS: string;
   };
   /** Lines to append to `.env` for this issue tracker, or empty string if none needed. */
@@ -553,6 +556,10 @@ const ISSUE_TRACKER_REGISTRY: IssueTrackerEntry[] = [
       LIST_PLANNING_TASKS_COMMAND: `gh issue list --state open --label needs-planning --label -planned --limit 100 --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
       VIEW_TASK_COMMAND: "gh issue view <ID>",
       CLOSE_TASK_COMMAND: `gh issue close <ID> --comment "Completed by Sandcastle"`,
+      COMMENT_ON_TASK_COMMAND: "gh issue comment <ID> --body-file <FILE>",
+      ADD_LABEL_COMMAND: "gh issue edit <ID> --add-label <LABEL>",
+      CREATE_TASK_COMMAND:
+        'gh issue create --label Sandcastle --title "<TITLE>" --body-file <FILE>',
       ISSUE_TRACKER_TOOLS: GITHUB_CLI_TOOLS,
     },
     envExample: `# GitHub personal access token — the agent uses it to read and manage GitHub Issues
@@ -569,6 +576,10 @@ const ISSUE_TRACKER_REGISTRY: IssueTrackerEntry[] = [
         "bd list --label needs-planning --exclude-label planned",
       VIEW_TASK_COMMAND: "bd show <ID>",
       CLOSE_TASK_COMMAND: `bd close <ID> --reason="Completed by Sandcastle"`,
+      // Verify the label/create forms against `bd --help` — beads moves fast.
+      COMMENT_ON_TASK_COMMAND: "bd comments add <ID>",
+      ADD_LABEL_COMMAND: "bd label <ID> <LABEL>",
+      CREATE_TASK_COMMAND: 'bd create "<TITLE>"',
       ISSUE_TRACKER_TOOLS: BEADS_TOOLS,
     },
     envExample: "",
@@ -585,6 +596,9 @@ const ISSUE_TRACKER_REGISTRY: IssueTrackerEntry[] = [
       // Inline text markers — replaced by the setup agent, never executed.
       VIEW_TASK_COMMAND: CUSTOM_VIEW_TASK_MARKER,
       CLOSE_TASK_COMMAND: CUSTOM_CLOSE_TASK_MARKER,
+      COMMENT_ON_TASK_COMMAND: `<comment command — see ${SETUP_ISSUE_TRACKER_PATH}>`,
+      ADD_LABEL_COMMAND: `<add-label command — see ${SETUP_ISSUE_TRACKER_PATH}>`,
+      CREATE_TASK_COMMAND: `<create command — see ${SETUP_ISSUE_TRACKER_PATH}>`,
       ISSUE_TRACKER_TOOLS: CUSTOM_TRACKER_TOOLS,
     },
     envExample: CUSTOM_ENV_EXAMPLE,
@@ -773,6 +787,9 @@ export function getNextStepsLines(
       );
       lines.push(
         `${step++}. Optional: set \`IDLE_POLL_SECONDS\` in .sandcastle/${mainFilename} to 0 to exit when no issues are ready instead of polling`,
+      );
+      lines.push(
+        `${step++}. Run \`sandcastle plan\` to start the planning workflow (grill → spec → tickets on requirements issues); run \`npm run sandcastle\` for the implement loop`,
       );
       lines.push(
         `${step++}. Read .sandcastle/AGENTS.md — the workflow guide for adding worktree or planner, stripping review, or switching sandbox provider`,
@@ -1237,7 +1254,7 @@ You are a coding agent. Finish wiring up the **custom issue tracker** for this S
 
 ## Goal
 
-Wire up the issue tracker so the scaffolded prompts can **list**, **view**, and **close** tasks. There is no runtime abstraction to implement — the tracker commands are baked into the scaffolded files, so you edit those files **in place**.
+Wire up the issue tracker so the scaffolded prompts can **list**, **view**, and **close** tasks, and the **planning workflow** can list **discussion tasks**, **comment**, **add labels**, and **create** child tasks. There is no runtime abstraction to implement — the tracker commands are baked into the scaffolded files, so you edit those files **in place**.
 
 ## 1. Interview the user
 
@@ -1246,15 +1263,24 @@ Ask the user:
 - Which issue tracker do they use (e.g. Jira, Linear, a GitHub repo other than this one, an internal API)?
 - How should the sandbox authenticate — a CLI that is already logged in, or an API token? If a token, what is the environment variable name?
 
-## 2. Produce three commands
+## 2. Produce the implement commands
 
 Work out, together with the user, the shell commands for:
 
-- **list** — print all open tasks **as JSON** (match the shape the built-in trackers emit: an array of objects, each with at least an id/number, title, and body). This is what the agent reads at the start of every iteration.
+- **list** — print all open ready tasks **as JSON** (match the shape the built-in trackers emit: an array of objects, each with at least an id/number, title, and body). This is what the agent reads at the start of every iteration.
 - **view** \`<ID>\` — show a single task by id.
 - **close** \`<ID>\` — close a single task by id.
 
-## 3. Edit the scaffolded files in place
+## 3. Produce the planning commands
+
+The **planning workflow** (\`sandcastle plan\`) runs on **discussion tasks** — requirements issues that humans open for planning. Produce:
+
+- **planning list** — print the open discussion tasks **as JSON** in the same array shape as the implement **list**, with each entry also carrying its \`labels\` and \`comments\` (the host probe reads those to decide the next phase). Discussion tasks are identified by a \`needs-planning\` label (or your tracker's equivalent); \`planned\` tasks (children already created) must be excluded.
+- **comment** \`<ID>\` — post a comment on a task (the grill questions and the spec are comments; the host tells human and agent comments apart by the \`[Sandcastle]\` marker at the start of agent comments).
+- **add label** \`<ID>\` — add a label to a task (the phase state machine uses \`aligned\`, \`specced\`, \`planned\`).
+- **create** — create a child ready task (the tickets phase creates children that carry the implement label, e.g. \`Sandcastle\`).
+
+## 4. Edit the scaffolded files in place
 
 ${
   cliNamespace
@@ -1278,11 +1304,19 @@ ${
 
   with your **list** command. In the prompt file the sentinel sits inside a Sandcastle **shell expression** — a leading \`!\` followed by the command in backticks — whose output is injected into the prompt before each run. Keep that \`!\` and the surrounding backticks; replace only the command between them, and **remove the \`exit 1\`** (leaving it keeps every run hard-failing). Then replace the \`${CUSTOM_VIEW_TASK_MARKER}\` and \`${CUSTOM_CLOSE_TASK_MARKER}\` markers with your **view** and **close** commands.
 
+- **Planning files (\`.sandcastle/plan.mts\`, \`.sandcastle/grill-prompt.md\`, \`.sandcastle/spec-prompt.md\`, \`.sandcastle/tickets-prompt.md\`)** — replace the planning sentinel
+
+  \`\`\`
+  ${CUSTOM_LIST_PLANNING_TASKS_SENTINEL}
+  \`\`\`
+
+  with your **planning list** command (same shell-expression rules as above; remove the \`exit 1\`). Then replace the \`<comment command — see ${SETUP_ISSUE_TRACKER_PATH}>\`, \`<add-label command — see ${SETUP_ISSUE_TRACKER_PATH}>\`, and \`<create command — see ${SETUP_ISSUE_TRACKER_PATH}>\` markers with your **comment**, **add label**, and **create** commands.
+
 - **\`.env\`** — replace the \`# TODO\` block with the real env var(s) your tracker needs, commented out until filled in.
 
 ${
   cliNamespace
-    ? `## 4. Build the image
+    ? `## 5. Build the image
 
 Once the files are wired up, build the sandbox image:
 
@@ -1290,10 +1324,10 @@ Once the files are wired up, build the sandbox image:
 sandcastle ${cliNamespace} build-image
 \`\`\`
 
-## 5. Verify
+## 6. Verify
 
 Run your **list** command inside the built image and confirm it returns the open tasks as JSON. If it errors, fix the command or the auth and rebuild.`
-    : `## 4. Verify
+    : `## 5. Verify
 
 Run your **list** command on the host and confirm it returns the open tasks as JSON. If it errors, fix the command or the auth before running the agent.`
 }

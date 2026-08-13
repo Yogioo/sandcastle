@@ -721,6 +721,39 @@ describe("sandcastle CLI", () => {
     }
   });
 
+  it("init --create-label true creates the Sandcastle and planning labels", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-label-host-"));
+    await initRepo(hostDir);
+    const binDir = await mkdtemp(join(tmpdir(), "cli-fake-gh-"));
+    const logPath = join(binDir, "gh-calls.log");
+    await writeFile(
+      join(binDir, "gh.cmd"),
+      `@echo off\r\necho %* >> "${logPath}"\r\nexit /b 0\r\n`,
+    );
+
+    try {
+      await runCli(
+        "init --agent codex --template blank --sandbox no-sandbox --issue-tracker github-issues --create-label true",
+        hostDir,
+        { PATH: `${binDir}${delimiter}${process.env.PATH}` },
+      );
+
+      const calls = await readFile(logPath, "utf-8");
+      for (const label of [
+        "Sandcastle",
+        "needs-planning",
+        "aligned",
+        "specced",
+        "planned",
+      ]) {
+        expect(calls).toContain(label);
+      }
+    } finally {
+      await rm(binDir, { recursive: true, force: true });
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
   it("init --issue-tracker github-issues without --create-label fails fast in non-interactive mode", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);

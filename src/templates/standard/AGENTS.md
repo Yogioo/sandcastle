@@ -1,8 +1,8 @@
 # Workflow guide
 
-This **config directory** was copied from the **standard** **workflow template**: a sequential implement→review loop on **head**. `@.sandcastle/AGENTS.md` is this file. Root `main.ts` / `main.mts` is the only runnable entry — do not add a feature-flag matrix there.
+This **config directory** was copied from the **standard** **workflow template**: a sequential implement→review loop on **head** plus the grill→spec→tickets **planning workflow**. `@.sandcastle/AGENTS.md` is this file. Root `main.ts` / `main.mts` is the **implement workflow** entry (`sandcastle`); its sibling `plan.ts` / `plan.mts` is the **planning workflow** entry (`sandcastle plan`). Do not add a feature-flag matrix to either entry.
 
-After **init**, edit files here. **Agent** (+ optional **model**), **sandbox provider**, and **issue tracker** are already written into root `main.ts`. When adapting orchestration, do not change those factories unless the user is applying one of the switch recipes: `recipes/agent/` (agent or model), `recipes/issue-tracker/`, or `recipes/sandbox-provider/`.
+After **init**, edit files here. **Agent** (+ optional **model**), **sandbox provider**, and **issue tracker** are already written into both root entries. When adapting orchestration, do not change those factories unless the user is applying one of the switch recipes: `recipes/agent/` (agent or model), `recipes/issue-tracker/`, or `recipes/sandbox-provider/`.
 
 ## Workflow features
 
@@ -15,6 +15,17 @@ After **init**, edit files here. **Agent** (+ optional **model**), **sandbox pro
 | _(not a feature)_ | `recipes/issue-tracker/`    | Redo the **init** **issue tracker** choice (github-issues ↔ beads ↔ custom). Not orchestration.                                            |
 
 Apply a feature by reading that recipe folder (short README + sliced reference code) and editing the copied files.
+
+## Planning workflow
+
+`sandcastle plan` runs root `plan.ts` / `plan.mts`: the grill→spec→tickets loop on **discussion tasks** (`needs-planning` label). It is a sibling process to the **implement workflow**, not a **workflow feature** and not the **planner** recipe.
+
+- One loop iteration runs exactly one **planning phase** (`grill` → `spec` → `tickets`) as its own agent session. Phase isolation lives in `plan.*`; never merge two phases into one session.
+- The host probes the planning list before each phase; waiting on a human idles without a sandbox. The phase state machine and the agent-comment marker live in `probe.ts` (imported by `plan.*`, tested from the Sandcastle repo).
+- Agent comments on discussion tasks start with `[Sandcastle]` — the probe uses that marker to tell agent comments from human replies without reading GitHub authors.
+- The three phase prompts (`grill-prompt.md`, `spec-prompt.md`, `tickets-prompt.md`) speak the protocol over issue comments; do not replace them with IDE skill invocations.
+- Label state machine: `needs-planning` → `aligned` (grill done) → `specced` (spec posted) → `planned` (children created; the parent stays open as the epic).
+- Phase logs land in `logs/planning-<pad>-<phase>.log`.
 
 ## Planner requires worktree
 

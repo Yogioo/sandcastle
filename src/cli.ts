@@ -789,14 +789,38 @@ const initCommand = Command.make(
         });
 
         if (shouldCreateLabel) {
-          yield* Effect.try({
-            try: () =>
-              execSync(
-                'gh label create "Sandcastle" --description "Issues for Sandcastle to work on" --color "F9A825" 2>/dev/null',
-                { cwd, stdio: "ignore" },
-              ),
-            catch: () => undefined,
-          }).pipe(Effect.ignore);
+          // The implement label plus the four planning-workflow labels
+          // (needs-planning → aligned → specced → planned). Each create is
+          // best-effort: labels may already exist from an earlier init.
+          const createLabelCall = (label: string, description: string) =>
+            Effect.try({
+              try: () =>
+                execSync(
+                  `gh label create "${label}" --description "${description}"`,
+                  { cwd, stdio: "ignore" },
+                ),
+              catch: () => undefined,
+            }).pipe(Effect.ignore);
+
+          yield* Effect.all([
+            createLabelCall("Sandcastle", "Issues for Sandcastle to work on"),
+            createLabelCall(
+              "needs-planning",
+              "Requirements discussion task waiting for the planning workflow",
+            ),
+            createLabelCall(
+              "aligned",
+              "Planning: requirement grilled, ready for the spec phase",
+            ),
+            createLabelCall(
+              "specced",
+              "Planning: spec posted, ready for the tickets phase",
+            ),
+            createLabelCall(
+              "planned",
+              "Planning: child ready tasks created (parent stays open)",
+            ),
+          ]);
         }
       }
 
