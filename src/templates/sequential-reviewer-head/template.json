@@ -1,0 +1,4 @@
+{
+  "name": "sequential-reviewer-head",
+  "description": "Head-mode implement→review loop (commit-range review, no worktree)"
+}

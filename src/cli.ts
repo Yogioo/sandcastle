@@ -633,26 +633,9 @@ const initCommand = Command.make(
         selectedTemplate = selected as string;
       }
 
-      // Resolve useWorktree: interactive confirm > default true.
-      let selectedUseWorktree = true;
-      if (!isInteractive) {
-        // Default to true when no interactive prompt is available.
-        selectedUseWorktree = true;
-      } else {
-        const useWorktreeConfirmed = yield* Effect.promise(() =>
-          clack.confirm({
-            message:
-              "Use git worktrees? (No = write directly to your working tree / head mode)",
-            initialValue: true,
-          }),
-        );
-        if (clack.isCancel(useWorktreeConfirmed)) {
-          yield* Effect.fail(
-            new InitError({ message: "Worktree selection cancelled." }),
-          );
-        }
-        selectedUseWorktree = useWorktreeConfirmed === true;
-      }
+      // Git mode is chosen via template (*-head vs default). Keep the internal
+      // default true so existing rewrite/validation paths stay unchanged.
+      const selectedUseWorktree = true;
 
       const scaffoldValidation = validateScaffoldOptions({
         agent: selectedAgent,

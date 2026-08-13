@@ -50,9 +50,19 @@ const TEMPLATES: TemplateMetadata[] = [
     description: "Picks issues one by one and closes them",
   },
   {
+    name: "simple-loop-head",
+    description:
+      "Picks issues one by one and closes them (head mode, no worktree)",
+  },
+  {
     name: "sequential-reviewer",
     description:
       "Implements issues one by one, with a code review step after each",
+  },
+  {
+    name: "sequential-reviewer-head",
+    description:
+      "Head-mode implement→review loop (commit-range review, no worktree)",
   },
   {
     name: "parallel-planner",
@@ -649,7 +659,7 @@ export const validateScaffoldOptions = (
     options.useWorktree === false &&
     WORKTREE_REQUIRED_TEMPLATES.has(templateName)
   ) {
-    return `Template "${templateName}" requires git worktrees. Choose to use worktrees or pick blank/simple-loop for head mode.`;
+    return `Template "${templateName}" requires git worktrees. Choose to use worktrees or pick blank/simple-loop/simple-loop-head/sequential-reviewer-head for head mode.`;
   }
   return undefined;
 };
@@ -757,17 +767,19 @@ export function getNextStepsLines(
     lines.push(
       `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
     );
+    // *-head templates are always head mode regardless of useWorktree default.
+    const isHeadTemplate = template.endsWith("-head") || !useWorktree;
     if (hostOnly) {
       lines.push(
         `${step++}. The agent runs directly on your host (no container). Ensure the agent CLI is installed and authenticated locally.`,
       );
-    } else if (useWorktree) {
+    } else if (isHeadTemplate) {
       lines.push(
-        `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. Adjust both if you use a different package manager`,
+        `${step++}. Head mode writes directly to your working tree — use a dedicated branch and review changes before merging.`,
       );
     } else {
       lines.push(
-        `${step++}. Head mode writes directly to your working tree — use a dedicated branch and review changes before merging.`,
+        `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. Adjust both if you use a different package manager`,
       );
     }
     if (usesPlanSchema) {

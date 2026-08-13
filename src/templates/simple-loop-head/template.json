@@ -1,0 +1,4 @@
+{
+  "name": "simple-loop-head",
+  "description": "Picks issues one by one and closes them (head mode, no worktree)"
+}

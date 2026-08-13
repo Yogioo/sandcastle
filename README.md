@@ -837,21 +837,21 @@ try {
 
 ### 模板
 
-`sandcastle init` 会提示选择沙箱提供商（Docker、Podman 或不使用沙箱）、是否使用 Git worktree、issue 跟踪器（GitHub Issues、Beads 或自定义）及模板，并将适合特定工作流的提示词与 `main.mts` 写入用户缓存状态目录。若项目 `package.json` 含 `"type": "module"`，文件名为 `main.ts`。选择 **自定义** 会生成故意未配置完成的状态，外加 `SETUP_ISSUE_TRACKER.md` 提示词，供编码代理接线你自己的跟踪器。共五种模板：
+`sandcastle init` 会提示选择沙箱提供商（Docker、Podman 或不使用沙箱）、issue 跟踪器（GitHub Issues、Beads 或自定义）及模板，并将适合特定工作流的提示词与 `main.mts` 写入用户缓存状态目录。若项目 `package.json` 含 `"type": "module"`，文件名为 `main.ts`。选择 **自定义** 会生成故意未配置完成的状态，外加 `SETUP_ISSUE_TRACKER.md` 提示词，供编码代理接线你自己的跟踪器。Git 模式由模板决定（`*-head` 为直接写当前工作树；默认模板使用 worktree / `merge-to-head`）。共七种模板：
 
-| 模板                           | 说明                               |
-| ------------------------------ | ---------------------------------- |
-| `blank`                        | 空白脚手架——自行编写提示词与编排   |
-| `simple-loop`                  | 逐个选取 issue 并关闭              |
-| `sequential-reviewer`          | 逐个实现 issue，每步后代码审查     |
-| `parallel-planner`             | 规划可并行 issue，分分支执行后合并 |
-| `parallel-planner-with-review` | 规划可并行 issue，每分支审查后合并 |
+| 模板                           | 说明                                                         |
+| ------------------------------ | ------------------------------------------------------------ |
+| `blank`                        | 空白脚手架——自行编写提示词与编排                             |
+| `simple-loop`                  | 逐个选取 issue 并关闭（worktree / merge-to-head）            |
+| `simple-loop-head`             | 同上，但 `branchStrategy: { type: "head" }`，无 worktree     |
+| `sequential-reviewer`          | 逐个实现 issue，每步后代码审查（独立 worktree 分支）         |
+| `sequential-reviewer-head`     | 同上，但在当前 checkout 上实现→审查；审查看本轮 commit 范围  |
+| `parallel-planner`             | 规划可并行 issue，分分支执行后合并                           |
+| `parallel-planner-with-review` | 规划可并行 issue，每分支审查后合并                           |
 
 在 `sandcastle init` 提示时选择模板，或在新仓库重新 init 尝试其他模板。使用 `--state-dir` 可以显式指定状态目录；CLI 不会因为找不到外部项目而回退到仓库内的旧 `.sandcastle`。
 
-选择 `no-sandbox` 会使用 `noSandbox()`，代理命令直接在宿主机执行。交互选择“不使用 Git worktree”
-会生成 `branchStrategy: { type: "head" }`，直接修改当前工作目录；`sequential-reviewer`、
-`parallel-planner` 和 `parallel-planner-with-review` 依赖独立 worktree，因此不能关闭 worktree。
+选择 `no-sandbox` 会使用 `noSandbox()`，代理命令直接在宿主机执行。需要 head 模式时选择 `simple-loop-head` 或 `sequential-reviewer-head`（直接修改当前工作目录）。`sequential-reviewer`、`parallel-planner` 和 `parallel-planner-with-review` 依赖独立 worktree，程序化传入 `useWorktree: false` 仍会被拒绝。
 
 ## CLI 命令
 
@@ -861,8 +861,7 @@ try {
 
 init 从 `packageManager` 字段或锁文件检测宿主机包管理器（npm、pnpm、yarn、bun），默认 npm。模板 `main` 若导入宿主机依赖——规划模板为 `<plan>` 输出 schema 导入 [Zod](https://zod.dev)——会在 `package.json` 中尚未存在时提示用该包管理器安装，避免首次运行缓存目录中的 `main.ts` 出现 `ERR_MODULE_NOT_FOUND`。
 
-init 的主要选项会在交互界面中选择；同时保留已有的 `--flag` 以支持 CI 和脚本。是否使用 Git
-worktree 只在交互界面中选择，不增加命令行参数。stdin 非 TTY 且缺少必填 flag 时，init 快速失败并给出明确错误，而非卡在提示上。
+init 的主要选项会在交互界面中选择；同时保留已有的 `--flag` 以支持 CI 和脚本。Git 模式不再作为独立交互选项——通过模板选择（`*-head` vs 默认）。stdin 非 TTY 且缺少必填 flag 时，init 快速失败并给出明确错误，而非卡在提示上。
 
 | 选项                      | 必填 | 默认值                       | 说明                                                                          |
 | ------------------------- | ---- | ---------------------------- | ----------------------------------------------------------------------------- |
@@ -870,7 +869,7 @@ worktree 只在交互界面中选择，不增加命令行参数。stdin 非 TTY 
 | `--agent`                 | 否   | 交互提示                     | 代理（`claude-code`、`pi`、`codex`、`cursor`、`opencode`、`copilot`）         |
 | `--model`                 | 否   | 代理默认模型                 | 模型（如 `claude-sonnet-4-6`）                                                |
 | `--sandbox`               | 否   | 交互提示                     | 沙箱提供商（`docker`、`podman`、`no-sandbox`）                                |
-| `--template`              | 否   | 交互提示                     | 模板（如 `blank`、`simple-loop`）                                             |
+| `--template`              | 否   | 交互提示                     | 模板（如 `blank`、`simple-loop`、`sequential-reviewer-head`）                 |
 | `--issue-tracker`         | 否   | 交互提示                     | issue 跟踪器（`github-issues`、`beads`、`custom`）                            |
 | `--create-label`          | 否   | 交互提示                     | `true` / `false`——是否创建 `Sandcastle` GitHub 标签（仅 `github-issues`）     |
 | `--build-image`           | 否   | 交互提示                     | `true` / `false`——是否立即构建沙箱镜像（`custom` 或 `no-sandbox` 时静默忽略） |

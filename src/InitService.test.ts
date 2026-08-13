@@ -649,6 +649,121 @@ describe("InitService scaffold", () => {
     });
   });
 
+  describe("sequential-reviewer-head template", () => {
+    it("appears in listTemplates()", () => {
+      expect(
+        listTemplates().some((t) => t.name === "sequential-reviewer-head"),
+      ).toBe(true);
+    });
+
+    it("produces main.mts, implement-prompt.md, review-prompt.md, and CODING_STANDARDS.md", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "sequential-reviewer-head" });
+
+      const configDir = join(dir, ".sandcastle");
+      const { access } = await import("node:fs/promises");
+      await expect(access(join(configDir, "main.mts"))).resolves.toBeUndefined();
+      await expect(
+        access(join(configDir, "implement-prompt.md")),
+      ).resolves.toBeUndefined();
+      await expect(
+        access(join(configDir, "review-prompt.md")),
+      ).resolves.toBeUndefined();
+      await expect(
+        access(join(configDir, "CODING_STANDARDS.md")),
+      ).resolves.toBeUndefined();
+    });
+
+    it("main.mts uses run() with head strategy and no createSandbox({ branch })", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "sequential-reviewer-head" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain('branchStrategy: { type: "head" }');
+      expect(mainTs).toContain("await run(");
+      expect(mainTs).not.toMatch(/\bcreateSandbox\s*\(/);
+      expect(mainTs).not.toContain("copyToWorktree");
+      expect(mainTs).not.toContain("merge-to-head");
+    });
+
+    it("main.mts captures BASE_SHA before implement and passes it to review", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "sequential-reviewer-head" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain('git rev-parse HEAD');
+      expect(mainTs).toContain("BASE_SHA: baseSha");
+      expect(mainTs).toContain("implement.commits.length");
+    });
+
+    it("review-prompt.md reviews BASE_SHA..HEAD commit range, not worktree branches", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "sequential-reviewer-head" });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "review-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("git diff {{BASE_SHA}}..HEAD");
+      expect(prompt).toContain("git log {{BASE_SHA}}..HEAD");
+      expect(prompt).not.toContain("{{BRANCH}}");
+      expect(prompt).not.toContain("{{TARGET_BRANCH}}");
+      expect(prompt).toContain("@.sandcastle/CODING_STANDARDS.md");
+    });
+
+    it("accepts useWorktree false (head template does not require worktrees)", async () => {
+      const dir = await makeDir();
+      await expect(
+        runScaffold(dir, {
+          templateName: "sequential-reviewer-head",
+          useWorktree: false,
+        }),
+      ).resolves.toBeDefined();
+    });
+  });
+
+  describe("simple-loop-head template", () => {
+    it("appears in listTemplates()", () => {
+      expect(listTemplates().some((t) => t.name === "simple-loop-head")).toBe(
+        true,
+      );
+    });
+
+    it("produces main.mts and prompt.md with head strategy and no copyToWorktree", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "simple-loop-head" });
+
+      const configDir = join(dir, ".sandcastle");
+      const { access } = await import("node:fs/promises");
+      await expect(access(join(configDir, "main.mts"))).resolves.toBeUndefined();
+      await expect(access(join(configDir, "prompt.md"))).resolves.toBeUndefined();
+
+      const mainTs = await readFile(join(configDir, "main.mts"), "utf-8");
+      expect(mainTs).toContain('branchStrategy: { type: "head" }');
+      expect(mainTs).not.toContain("merge-to-head");
+      expect(mainTs).not.toContain("copyToWorktree");
+      expect(mainTs).toContain("await run(");
+    });
+
+    it("prompt.md contains issue selection shell expressions", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "simple-loop-head" });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("gh issue list");
+      expect(prompt).toContain("gh issue close");
+    });
+  });
+
   it("simple-loop template does not scaffold compiled .js or .d.ts files", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop" });
@@ -712,6 +827,19 @@ describe("InitService scaffold", () => {
       const joined = lines.join("\n");
       expect(joined).toContain("copyToWorktree");
       expect(joined).toContain("node_modules");
+    });
+
+    it("*-head templates use head-mode next steps even when useWorktree defaults true", () => {
+      for (const template of ["simple-loop-head", "sequential-reviewer-head"]) {
+        const lines = next(template, "main.mts").join("\n");
+        expect(lines).toContain("Head mode");
+        expect(lines).not.toContain("copyToWorktree");
+      }
+    });
+
+    it("sequential-reviewer-head next steps mention CODING_STANDARDS.md", () => {
+      const lines = next("sequential-reviewer-head", "main.mts").join("\n");
+      expect(lines).toContain("CODING_STANDARDS.md");
     });
 
     it("blank template includes a step to customize prompt.md", () => {
@@ -2544,6 +2672,15 @@ describe("InitService scaffold", () => {
         }),
       ).toContain("requires git worktrees");
 
+      expect(
+        validateScaffoldOptions({
+          agent: claudeCodeAgent,
+          model: "claude-opus-4-8",
+          templateName: "sequential-reviewer",
+          useWorktree: false,
+        }),
+      ).toContain("requires git worktrees");
+
       const dir = await makeDir();
       await expect(
         runScaffold(dir, {
@@ -2551,6 +2688,25 @@ describe("InitService scaffold", () => {
           useWorktree: false,
         }),
       ).rejects.toThrow("requires git worktrees");
+    });
+
+    it("allows useWorktree false for head templates", () => {
+      expect(
+        validateScaffoldOptions({
+          agent: claudeCodeAgent,
+          model: "claude-opus-4-8",
+          templateName: "simple-loop-head",
+          useWorktree: false,
+        }),
+      ).toBeUndefined();
+      expect(
+        validateScaffoldOptions({
+          agent: claudeCodeAgent,
+          model: "claude-opus-4-8",
+          templateName: "sequential-reviewer-head",
+          useWorktree: false,
+        }),
+      ).toBeUndefined();
     });
 
     it("no-worktree next steps omit copyToWorktree guidance", () => {

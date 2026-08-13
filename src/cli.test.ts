@@ -133,6 +133,8 @@ describe("sandcastle CLI", () => {
       expect(output).toContain("nonexistent");
       expect(output).toContain("blank");
       expect(output).toContain("simple-loop");
+      expect(output).toContain("simple-loop-head");
+      expect(output).toContain("sequential-reviewer-head");
     }
   });
 
