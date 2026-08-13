@@ -1,0 +1,4 @@
+{
+  "name": "standard",
+  "description": "Default implement→review loop on head (idle poll, commit-range review)"
+}

@@ -103,19 +103,11 @@ describe("hostHasDependency", () => {
 });
 
 describe("getTemplateDependencies", () => {
-  it("reports zod as a dependency of the planner templates", () => {
-    expect(getTemplateDependencies("parallel-planner")).toContain("zod");
-    expect(getTemplateDependencies("parallel-planner-with-review")).toContain(
-      "zod",
-    );
-    expect(getTemplateDependencies("sequential-reviewer")).toContain("zod");
-    expect(getTemplateDependencies("sequential-reviewer-head")).toContain(
-      "zod",
-    );
+  it("reports zod as a dependency of the standard workflow template", () => {
+    expect(getTemplateDependencies("standard")).toContain("zod");
   });
 
   it("reports no dependencies for templates that don't need a schema validator", () => {
-    expect(getTemplateDependencies("simple-loop")).not.toContain("zod");
     expect(getTemplateDependencies("blank")).not.toContain("zod");
   });
 });

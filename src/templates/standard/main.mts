@@ -1,4 +1,4 @@
-// Sequential Reviewer (head) — implement-then-review on the current checkout
+// Standard workflow — implement-then-review on the current checkout
 //
 // This template drives a two-phase workflow per issue:
 //   Phase 1 (Implement): A sonnet agent picks an open issue, works on it

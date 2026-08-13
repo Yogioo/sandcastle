@@ -12,7 +12,6 @@ import {
   listIssueTrackers,
   getIssueTracker,
   getSandboxProvider,
-  validateScaffoldOptions,
 } from "./InitService.js";
 import type {
   AgentEntry,
@@ -80,7 +79,7 @@ describe("InitService scaffold", () => {
 
     await runScaffold(repoDir, {
       stateDir,
-      templateName: "sequential-reviewer-head",
+      templateName: "standard",
       sandboxProvider: getSandboxProvider("no-sandbox")!,
     });
 
@@ -93,13 +92,13 @@ describe("InitService scaffold", () => {
     expect(main).not.toContain('from "@yogioo/sandcastle/sandboxes/docker"');
   });
 
-  it("keeps a static zod import when the planner lives outside the repo", async () => {
+  it("keeps a static zod import when the workflow lives outside the repo", async () => {
     const repoDir = await makeDir();
     const stateDir = join(repoDir, "cache", ".sandcastle");
 
     await runScaffold(repoDir, {
       stateDir,
-      templateName: "parallel-planner",
+      templateName: "standard",
     });
 
     const main = await readFile(join(stateDir, "main.mts"), "utf-8");
@@ -115,7 +114,7 @@ describe("InitService scaffold", () => {
 
     await runScaffold(repoDir, {
       stateDir,
-      templateName: "sequential-reviewer",
+      templateName: "standard",
       sandboxProvider: dockerProvider,
     });
 
@@ -135,7 +134,7 @@ describe("InitService scaffold", () => {
 
     await runScaffold(repoDir, {
       stateDir,
-      templateName: "sequential-reviewer",
+      templateName: "standard",
       sandboxProvider: getSandboxProvider("no-sandbox")!,
     });
 
@@ -354,7 +353,7 @@ describe("InitService scaffold", () => {
 
   it("skeleton prompt contains section headers and hints", async () => {
     const dir = await makeDir();
-    await runScaffold(dir);
+    await runScaffold(dir, { templateName: "blank" });
 
     const prompt = await readFile(
       join(dir, ".sandcastle", "prompt.md"),
@@ -400,18 +399,18 @@ describe("InitService scaffold", () => {
     expect(mainTs).toContain("run(");
   });
 
-  it("blank template produces identical output to default (no template arg)", async () => {
+  it("standard template produces identical output to default (no template arg)", async () => {
     const dir1 = await makeDir();
     const dir2 = await makeDir();
     await runScaffold(dir1);
-    await runScaffold(dir2, { templateName: "blank" });
+    await runScaffold(dir2, { templateName: "standard" });
 
     const prompt1 = await readFile(
-      join(dir1, ".sandcastle", "prompt.md"),
+      join(dir1, ".sandcastle", "implement-prompt.md"),
       "utf-8",
     );
     const prompt2 = await readFile(
-      join(dir2, ".sandcastle", "prompt.md"),
+      join(dir2, ".sandcastle", "implement-prompt.md"),
       "utf-8",
     );
     expect(prompt1).toBe(prompt2);
@@ -445,42 +444,8 @@ describe("InitService scaffold", () => {
 
   // --- Template-specific tests ---
 
-  it("simple-loop template produces main.mts and prompt.md", async () => {
-    const dir = await makeDir();
-    await runScaffold(dir, { templateName: "simple-loop" });
-
-    const configDir = join(dir, ".sandcastle");
-    const { access } = await import("node:fs/promises");
-
-    await expect(access(join(configDir, "main.mts"))).resolves.toBeUndefined();
-    await expect(access(join(configDir, "prompt.md"))).resolves.toBeUndefined();
-  });
-
-  it("simple-loop main.mts imports from @yogioo/sandcastle", async () => {
-    const dir = await makeDir();
-    await runScaffold(dir, { templateName: "simple-loop" });
-
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
-    expect(mainTs).toContain('"@yogioo/sandcastle"');
-  });
-
-  it("simple-loop main.mts contains sandcastle.run() with expected options", async () => {
-    const dir = await makeDir();
-    await runScaffold(dir, { templateName: "simple-loop" });
-
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
-    expect(mainTs).toContain("run(");
-    expect(mainTs).toContain("maxIterations");
-    expect(mainTs).toContain("3");
-    expect(mainTs).toContain("promptFile");
-    expect(mainTs).toContain("copyToWorktree");
-    expect(mainTs).not.toContain('command: "npm install"');
+  it("listTemplates() is only standard and blank, with standard first", () => {
+    expect(listTemplates().map((t) => t.name)).toEqual(["standard", "blank"]);
   });
 
   it("no bundled template runs npm install as an onSandboxReady hook", async () => {
@@ -495,288 +460,111 @@ describe("InitService scaffold", () => {
     }
   });
 
-  it("simple-loop prompt.md contains shell expressions for issues and commit history", async () => {
-    const dir = await makeDir();
-    await runScaffold(dir, { templateName: "simple-loop" });
-
-    const prompt = await readFile(
-      join(dir, ".sandcastle", "prompt.md"),
-      "utf-8",
-    );
-    expect(prompt).toContain("!`gh issue");
-    expect(prompt).toContain("!`git log");
-    expect(prompt).toContain("<promise>COMPLETE</promise>");
-  });
-
-  describe("sequential-reviewer template", () => {
-    it("produces main.mts, implement-prompt.md, and review-prompt.md", async () => {
+  describe("workflow recipes (copied with standard)", () => {
+    it("copies a file under recipes/worktree/ into the config directory", async () => {
       const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer" });
+      await runScaffold(dir, { templateName: "standard" });
 
-      const configDir = join(dir, ".sandcastle");
       const { access } = await import("node:fs/promises");
-
       await expect(
-        access(join(configDir, "main.mts")),
+        access(join(dir, ".sandcastle", "recipes", "worktree", "README.md")),
       ).resolves.toBeUndefined();
       await expect(
-        access(join(configDir, "implement-prompt.md")),
+        access(join(dir, ".sandcastle", "recipes", "worktree", "main.mts")),
       ).resolves.toBeUndefined();
       await expect(
-        access(join(configDir, "review-prompt.md")),
+        access(join(dir, ".sandcastle", "AGENTS.md")),
       ).resolves.toBeUndefined();
     });
 
-    it("main.mts imports from @yogioo/sandcastle", async () => {
+    it("substitutes template arguments in recipe prompt files", async () => {
       const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer" });
+      await runScaffold(dir, { templateName: "standard" });
 
-      const mainTs = await readFile(
+      const planPrompt = await readFile(
+        join(dir, ".sandcastle", "recipes", "planner", "plan-prompt.md"),
+        "utf-8",
+      );
+      expect(planPrompt).toContain("gh issue list");
+      expect(planPrompt).not.toContain("{{LIST_TASKS_COMMAND}}");
+    });
+
+    it("rewrites agent and sandbox provider on root main and recipe mains", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "standard",
+        agent: piAgent,
+        sandboxProvider: getSandboxProvider("no-sandbox")!,
+      });
+
+      const rootMain = await readFile(
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain('"@yogioo/sandcastle"');
-    });
+      expect(rootMain).toContain(
+        'import { noSandbox } from "@yogioo/sandcastle/sandboxes/no-sandbox"',
+      );
+      expect(rootMain).toContain("pi()");
+      expect(rootMain).not.toContain("claudeCode");
+      expect(rootMain).not.toContain("docker");
 
-    it("main.mts uses createSandbox so implementer and reviewer share a sandbox", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer" });
-
-      const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+      const recipeMain = await readFile(
+        join(dir, ".sandcastle", "recipes", "worktree", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain("createSandbox");
-      expect(mainTs).toContain("sandbox.run");
-      expect(mainTs).toContain("sandbox.close");
-      expect(mainTs).toContain("implement-prompt.md");
-      expect(mainTs).toContain("review-prompt.md");
-    });
-
-    it("main.mts does not use merge-to-head (incompatible with reviewer handoff)", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer" });
-
-      const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+      expect(recipeMain).toContain(
+        'import { noSandbox } from "@yogioo/sandcastle/sandboxes/no-sandbox"',
       );
-      expect(mainTs).not.toContain("merge-to-head");
+      expect(recipeMain).toContain("pi()");
+      expect(recipeMain).toContain("createSandbox");
+      expect(recipeMain).not.toContain("claudeCode");
+      expect(recipeMain).not.toContain("docker");
     });
 
-    it("main.mts only reviews when implementer reports done with commits", async () => {
+    it("worktree review-prompt diffs BRANCH against TARGET_BRANCH", async () => {
       const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer" });
-
-      const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      expect(mainTs).toContain('status === "done"');
-      expect(mainTs).toContain("commits.length > 0");
-    });
-
-    it("implement-prompt.md contains issue selection and closure, not prompt argument placeholders", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer" });
+      await runScaffold(dir, { templateName: "standard" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("gh issue list");
-      expect(prompt).toContain("gh issue close");
-      expect(prompt).not.toContain("{{ISSUE_NUMBER}}");
-      expect(prompt).not.toContain("{{ISSUE_TITLE}}");
-      expect(prompt).not.toContain("{{BRANCH}}");
-    });
-
-    it("implement-prompt.md hints the issue list is pre-filtered and discourages unfiltered re-query", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer" });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain(
-        "already been filtered to issues ready for work",
-      );
-      expect(prompt).toContain("sole source of truth");
-      expect(prompt).toContain("Do not run your own unfiltered query");
-    });
-
-    it("review-prompt.md contains {{BRANCH}} prompt argument", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer" });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "review-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("{{BRANCH}}");
-    });
-
-    it("sequential-reviewer appears in listTemplates()", async () => {
-      const templates = listTemplates();
-      expect(templates.some((t) => t.name === "sequential-reviewer")).toBe(
-        true,
-      );
-    });
-
-    it("scaffolds CODING_STANDARDS.md with minimal starter content", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer" });
-
-      const standards = await readFile(
-        join(dir, ".sandcastle", "CODING_STANDARDS.md"),
-        "utf-8",
-      );
-      expect(standards).toContain("# Coding Standards");
-      // Should have guiding comment, not opinionated defaults
-      expect(standards).toContain("Customize");
-    });
-
-    it("review-prompt.md references @.sandcastle/CODING_STANDARDS.md", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer" });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "review-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("@.sandcastle/CODING_STANDARDS.md");
-    });
-
-    it("review-prompt.md diffs against {{TARGET_BRANCH}} (the fork point), not the branch itself", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer" });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "review-prompt.md"),
+        join(dir, ".sandcastle", "recipes", "worktree", "review-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("git diff {{TARGET_BRANCH}}...{{BRANCH}}");
       expect(prompt).toContain("git log {{TARGET_BRANCH}}..{{BRANCH}}");
-      // SOURCE_BRANCH equals BRANCH at run time, so diffing against it is
-      // always empty — the prompt must use TARGET_BRANCH instead.
       expect(prompt).not.toContain("{{SOURCE_BRANCH}}");
-      expect(prompt).not.toContain("git diff main");
-      expect(prompt).not.toContain("git log main");
+      expect(prompt).toContain("@.sandcastle/CODING_STANDARDS.md");
     });
 
-    it("main.mts runs the implementer for a single iteration (one issue per outer pass)", async () => {
+    it("planner recipe includes plan/implement/merge prompts and Promise.allSettled", async () => {
       const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer" });
+      await runScaffold(dir, { templateName: "standard" });
 
-      const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      const implementerSection = mainTs.slice(
-        mainTs.indexOf('name: "implementer"'),
-        mainTs.indexOf('name: "implementer"') + 200,
-      );
-      expect(implementerSection).toContain("maxIterations: 1");
-      expect(implementerSection).not.toContain("maxIterations: 100");
-    });
+      const { access } = await import("node:fs/promises");
+      const plannerDir = join(dir, ".sandcastle", "recipes", "planner");
+      await expect(
+        access(join(plannerDir, "plan-prompt.md")),
+      ).resolves.toBeUndefined();
+      await expect(
+        access(join(plannerDir, "implement-prompt.md")),
+      ).resolves.toBeUndefined();
+      await expect(
+        access(join(plannerDir, "merge-prompt.md")),
+      ).resolves.toBeUndefined();
 
-    it("main.mts stops the loop when the implementer reports empty with no commits", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer" });
-
-      const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      const emptyIndex = mainTs.indexOf(
-        'status === "empty" && commits.length === 0',
-      );
-      expect(emptyIndex).toBeGreaterThan(-1);
-      const section = mainTs.slice(emptyIndex, emptyIndex + 400);
-      expect(section).toContain("break");
-      expect(mainTs).not.toContain("!implement.commits.length");
-    });
-
-    it("main.mts probes the host list before createSandbox and defaults to idle-and-poll", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer" });
-
-      const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      expect(mainTs).toContain("const IDLE_POLL_SECONDS = 30;");
-      expect(mainTs).toContain("probeReadyTasks");
-      expect(mainTs).toContain("while (iteration < MAX_ITERATIONS)");
-      expect(mainTs).toContain("iteration += 1");
-      expect(mainTs.indexOf("probeReadyTasks")).toBeLessThan(
-        mainTs.indexOf("await sandcastle.createSandbox"),
-      );
-      expect(mainTs.indexOf("probed.count <= 0")).toBeLessThan(
-        mainTs.indexOf("iteration += 1"),
-      );
-      expect(mainTs).toContain("gh issue list");
-      expect(mainTs).not.toContain("{{LIST_TASKS_COMMAND}}");
-    });
-
-    it("main.mts resumes once on StructuredOutputError then falls back to git", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer" });
-
-      const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      expect(mainTs).toContain("StructuredOutputError");
-      expect(mainTs).toContain("resumeSession: error.sessionId");
-      expect(mainTs).toContain("MAX_OUTCOME_FAILURES");
-      expect(mainTs).toContain("fallbackOutcome");
-    });
-
-    it("main.mts extracts a structured <outcome> from the implementer", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer" });
-
-      const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      expect(mainTs).toContain("Output.object");
-      expect(mainTs).toContain('tag: "outcome"');
-      expect(mainTs).toContain('from "zod"');
-      expect(mainTs).toContain('"done"');
-      expect(mainTs).toContain('"no_change"');
-      expect(mainTs).toContain('"blocked"');
-      expect(mainTs).toContain('"empty"');
-    });
-
-    it("implement-prompt.md instructs the agent to emit <outcome> statuses", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer" });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("<outcome>");
-      expect(prompt).toContain('"status": "done"');
-      expect(prompt).toContain("`no_change`");
-      expect(prompt).toContain("`blocked`");
-      expect(prompt).toContain("`empty`");
+      const mainTs = await readFile(join(plannerDir, "main.mts"), "utf-8");
+      expect(mainTs).toContain("Promise.allSettled");
+      expect(mainTs).toContain('tag: "plan"');
     });
   });
 
-  describe("sequential-reviewer-head template", () => {
+  describe("standard template", () => {
     it("appears in listTemplates()", () => {
-      expect(
-        listTemplates().some((t) => t.name === "sequential-reviewer-head"),
-      ).toBe(true);
+      expect(listTemplates().some((t) => t.name === "standard")).toBe(true);
     });
 
     it("produces main.mts, implement-prompt.md, review-prompt.md, and CODING_STANDARDS.md", async () => {
       const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer-head" });
+      await runScaffold(dir, { templateName: "standard" });
 
       const configDir = join(dir, ".sandcastle");
       const { access } = await import("node:fs/promises");
@@ -796,7 +584,7 @@ describe("InitService scaffold", () => {
 
     it("main.mts uses run() with head strategy and no createSandbox({ branch })", async () => {
       const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer-head" });
+      await runScaffold(dir, { templateName: "standard" });
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
@@ -811,7 +599,7 @@ describe("InitService scaffold", () => {
 
     it("main.mts captures BASE_SHA before implement and passes it to review", async () => {
       const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer-head" });
+      await runScaffold(dir, { templateName: "standard" });
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
@@ -824,7 +612,7 @@ describe("InitService scaffold", () => {
 
     it("main.mts stops the loop when the implementer reports empty with no commits", async () => {
       const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer-head" });
+      await runScaffold(dir, { templateName: "standard" });
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
@@ -840,7 +628,7 @@ describe("InitService scaffold", () => {
 
     it("main.mts probes the host list before run() and defaults to idle-and-poll", async () => {
       const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer-head" });
+      await runScaffold(dir, { templateName: "standard" });
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
@@ -862,7 +650,7 @@ describe("InitService scaffold", () => {
 
     it("main.mts resumes once on StructuredOutputError then falls back to git", async () => {
       const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer-head" });
+      await runScaffold(dir, { templateName: "standard" });
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
@@ -876,7 +664,7 @@ describe("InitService scaffold", () => {
 
     it("implement-prompt.md instructs the agent to emit <outcome> statuses", async () => {
       const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer-head" });
+      await runScaffold(dir, { templateName: "standard" });
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "implement-prompt.md"),
@@ -889,7 +677,7 @@ describe("InitService scaffold", () => {
 
     it("review-prompt.md reviews BASE_SHA..HEAD commit range, not worktree branches", async () => {
       const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer-head" });
+      await runScaffold(dir, { templateName: "standard" });
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "review-prompt.md"),
@@ -906,56 +694,16 @@ describe("InitService scaffold", () => {
       const dir = await makeDir();
       await expect(
         runScaffold(dir, {
-          templateName: "sequential-reviewer-head",
+          templateName: "standard",
           useWorktree: false,
         }),
       ).resolves.toBeDefined();
     });
   });
 
-  describe("simple-loop-head template", () => {
-    it("appears in listTemplates()", () => {
-      expect(listTemplates().some((t) => t.name === "simple-loop-head")).toBe(
-        true,
-      );
-    });
-
-    it("produces main.mts and prompt.md with head strategy and no copyToWorktree", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "simple-loop-head" });
-
-      const configDir = join(dir, ".sandcastle");
-      const { access } = await import("node:fs/promises");
-      await expect(
-        access(join(configDir, "main.mts")),
-      ).resolves.toBeUndefined();
-      await expect(
-        access(join(configDir, "prompt.md")),
-      ).resolves.toBeUndefined();
-
-      const mainTs = await readFile(join(configDir, "main.mts"), "utf-8");
-      expect(mainTs).toContain('branchStrategy: { type: "head" }');
-      expect(mainTs).not.toContain("merge-to-head");
-      expect(mainTs).not.toContain("copyToWorktree");
-      expect(mainTs).toContain("await run(");
-    });
-
-    it("prompt.md contains issue selection shell expressions", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "simple-loop-head" });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("gh issue list");
-      expect(prompt).toContain("gh issue close");
-    });
-  });
-
-  it("simple-loop template does not scaffold compiled .js or .d.ts files", async () => {
+  it("standard template does not scaffold compiled .js or .d.ts files", async () => {
     const dir = await makeDir();
-    await runScaffold(dir, { templateName: "simple-loop" });
+    await runScaffold(dir, { templateName: "standard" });
 
     const { readdir } = await import("node:fs/promises");
     const files = await readdir(join(dir, ".sandcastle"));
@@ -998,7 +746,7 @@ describe("InitService scaffold", () => {
     });
 
     it("non-blank template returns steps mentioning .env, package.json scripts, and npm run sandcastle", () => {
-      const lines = next("simple-loop", "main.mts");
+      const lines = next("standard", "main.mts");
       const joined = lines.join("\n");
       expect(joined).toContain(".env");
       expect(joined).not.toContain(".env.example");
@@ -1006,30 +754,14 @@ describe("InitService scaffold", () => {
       expect(joined).toContain("npm run sandcastle");
     });
 
-    it("non-blank template includes a note about adding an onSandboxReady install command", () => {
-      const lines = next("simple-loop", "main.mts");
-      const joined = lines.join("\n");
-      expect(joined).toContain("onSandboxReady");
-      expect(joined).toContain("install command");
+    it("standard uses head-mode next steps even when useWorktree defaults true", () => {
+      const lines = next("standard", "main.mts").join("\n");
+      expect(lines).toContain("Head mode");
+      expect(lines).not.toContain("copyToWorktree");
     });
 
-    it("non-blank template mentions copyToWorktree and node_modules", () => {
-      const lines = next("simple-loop", "main.mts");
-      const joined = lines.join("\n");
-      expect(joined).toContain("copyToWorktree");
-      expect(joined).toContain("node_modules");
-    });
-
-    it("*-head templates use head-mode next steps even when useWorktree defaults true", () => {
-      for (const template of ["simple-loop-head", "sequential-reviewer-head"]) {
-        const lines = next(template, "main.mts").join("\n");
-        expect(lines).toContain("Head mode");
-        expect(lines).not.toContain("copyToWorktree");
-      }
-    });
-
-    it("sequential-reviewer-head next steps mention CODING_STANDARDS.md", () => {
-      const lines = next("sequential-reviewer-head", "main.mts").join("\n");
+    it("standard next steps mention CODING_STANDARDS.md", () => {
+      const lines = next("standard", "main.mts").join("\n");
       expect(lines).toContain("CODING_STANDARDS.md");
     });
 
@@ -1039,22 +771,8 @@ describe("InitService scaffold", () => {
       expect(joined).toContain("prompt.md");
     });
 
-    it("simple-loop template includes a step to read/customize prompt files", () => {
-      const lines = next("simple-loop", "main.mts");
-      const joined = lines.join("\n");
-      expect(joined).toContain("prompt");
-      expect(joined).toMatch(/customiz|review|read/i);
-    });
-
-    it("sequential-reviewer template includes a step mentioning prompt files", () => {
-      const lines = next("sequential-reviewer", "main.mts");
-      const joined = lines.join("\n");
-      expect(joined).toContain("prompt");
-      expect(joined).toMatch(/customiz|review|read/i);
-    });
-
-    it("parallel-planner template includes a step mentioning prompt files", () => {
-      const lines = next("parallel-planner", "main.mts");
+    it("standard template includes a step to read/customize prompt files", () => {
+      const lines = next("standard", "main.mts");
       const joined = lines.join("\n");
       expect(joined).toContain("prompt");
       expect(joined).toMatch(/customiz|review|read/i);
@@ -1067,7 +785,7 @@ describe("InitService scaffold", () => {
     });
 
     it("returns at least 3 numbered steps for non-blank templates", () => {
-      const lines = next("simple-loop", "main.mts");
+      const lines = next("standard", "main.mts");
       const numberedSteps = lines.filter((l) => /^\d+\./.test(l));
       expect(numberedSteps.length).toBeGreaterThanOrEqual(3);
     });
@@ -1079,16 +797,10 @@ describe("InitService scaffold", () => {
       expect(joined).not.toContain("main.mts");
     });
 
-    it("reviewer template mentions CODING_STANDARDS.md customization", () => {
-      const lines = next("sequential-reviewer", "main.mts");
+    it("standard template mentions CODING_STANDARDS.md customization", () => {
+      const lines = next("standard", "main.mts");
       const joined = lines.join("\n");
       expect(joined).toContain("CODING_STANDARDS.md");
-    });
-
-    it("non-reviewer template does not mention CODING_STANDARDS.md", () => {
-      const lines = next("simple-loop", "main.mts");
-      const joined = lines.join("\n");
-      expect(joined).not.toContain("CODING_STANDARDS.md");
     });
 
     it("blank template does not mention CODING_STANDARDS.md", () => {
@@ -1097,55 +809,38 @@ describe("InitService scaffold", () => {
       expect(joined).not.toContain("CODING_STANDARDS.md");
     });
 
-    it("planner template includes a step to install a schema validator", () => {
-      const lines = next("parallel-planner", "main.mts");
+    it("standard template includes a step to install a schema validator", () => {
+      const lines = next("standard", "main.mts");
       const joined = lines.join("\n");
       expect(joined).toContain("npm install zod");
       expect(joined).toContain("standardschema.dev");
     });
 
-    it("parallel-planner-with-review template includes the schema validator step", () => {
-      const lines = next("parallel-planner-with-review", "main.mts");
-      const joined = lines.join("\n");
-      expect(joined).toContain("npm install zod");
-    });
-
-    it("sequential-reviewer templates include the schema validator step", () => {
-      expect(next("sequential-reviewer", "main.mts").join("\n")).toContain(
-        "npm install zod",
-      );
-      expect(next("sequential-reviewer-head", "main.mts").join("\n")).toContain(
-        "npm install zod",
-      );
-    });
-
-    it("sequential-reviewer next steps mention IDLE_POLL_SECONDS", () => {
-      const reviewer = next("sequential-reviewer", "main.mts").join("\n");
-      const head = next("sequential-reviewer-head", "main.mts").join("\n");
-      expect(reviewer).toContain("IDLE_POLL_SECONDS");
-      expect(reviewer).toContain("to 0");
+    it("standard next steps mention IDLE_POLL_SECONDS and AGENTS.md", () => {
+      const head = next("standard", "main.mts").join("\n");
       expect(head).toContain("IDLE_POLL_SECONDS");
       expect(head).toContain("to 0");
-      expect(next("simple-loop", "main.mts").join("\n")).not.toContain(
+      expect(head).toContain("AGENTS.md");
+      expect(next("blank", "main.mts").join("\n")).not.toContain(
         "IDLE_POLL_SECONDS",
       );
     });
 
-    it("planner zod step uses the detected package manager's add command", () => {
-      expect(next("parallel-planner", "main.mts", "pnpm").join("\n")).toContain(
+    it("standard zod step uses the detected package manager's add command", () => {
+      expect(next("standard", "main.mts", "pnpm").join("\n")).toContain(
         "pnpm add zod",
       );
-      expect(next("parallel-planner", "main.mts", "yarn").join("\n")).toContain(
+      expect(next("standard", "main.mts", "yarn").join("\n")).toContain(
         "yarn add zod",
       );
-      expect(next("parallel-planner", "main.mts", "bun").join("\n")).toContain(
+      expect(next("standard", "main.mts", "bun").join("\n")).toContain(
         "bun add zod",
       );
     });
 
     it("claude-code agent gets a `claude setup-token` hint under the env-vars step", () => {
       const blank = next("blank", "main.mts").join("\n");
-      const nonBlank = next("simple-loop", "main.mts").join("\n");
+      const nonBlank = next("standard", "main.mts").join("\n");
       expect(blank).toContain("claude setup-token");
       expect(blank).toContain("CLAUDE_CODE_OAUTH_TOKEN");
       expect(nonBlank).toContain("claude setup-token");
@@ -1154,7 +849,7 @@ describe("InitService scaffold", () => {
 
     it("non-claude-code agents do not get the `claude setup-token` hint", () => {
       const piLines = getNextStepsLines(
-        "simple-loop",
+        "standard",
         "main.mts",
         ghIssues,
         piAgent,
@@ -1175,20 +870,20 @@ describe("InitService scaffold", () => {
 
     it("next steps no longer link to the closed issues/191 workaround", () => {
       const blank = next("blank", "main.mts").join("\n");
-      const nonBlank = next("simple-loop", "main.mts").join("\n");
+      const nonBlank = next("standard", "main.mts").join("\n");
       expect(blank).not.toContain("issues/191");
       expect(nonBlank).not.toContain("issues/191");
     });
 
-    it("non-planner template does not mention installing zod", () => {
-      const lines = next("simple-loop", "main.mts");
+    it("blank template does not mention installing zod", () => {
+      const lines = next("blank", "main.mts");
       const joined = lines.join("\n");
       expect(joined).not.toContain("zod");
     });
 
     it("custom issue tracker points at the setup doc and the agent's setup command, regardless of template", () => {
       const lines = getNextStepsLines(
-        "simple-loop",
+        "standard",
         "main.mts",
         customManager,
         claudeCodeAgent,
@@ -1311,53 +1006,20 @@ describe("InitService scaffold", () => {
 
   // --- createLabel option ---
 
-  it("simple-loop prompt.md retains --label Sandcastle when createLabel is true", async () => {
+  it("standard implement-prompt.md retains --label Sandcastle when createLabel is true", async () => {
     const dir = await makeDir();
-    await runScaffold(dir, { templateName: "simple-loop", createLabel: true });
+    await runScaffold(dir, { templateName: "standard", createLabel: true });
 
     const prompt = await readFile(
-      join(dir, ".sandcastle", "prompt.md"),
+      join(dir, ".sandcastle", "implement-prompt.md"),
       "utf-8",
     );
     expect(prompt).toContain("--label Sandcastle");
   });
 
-  it("simple-loop prompt.md strips --label Sandcastle when createLabel is false", async () => {
+  it("standard implement-prompt.md strips --label Sandcastle when createLabel is false", async () => {
     const dir = await makeDir();
-    await runScaffold(dir, { templateName: "simple-loop", createLabel: false });
-
-    const prompt = await readFile(
-      join(dir, ".sandcastle", "prompt.md"),
-      "utf-8",
-    );
-    expect(prompt).not.toContain("--label Sandcastle");
-    // The gh issue list command should still be valid
-    expect(prompt).toContain("gh issue list");
-    // No double spaces in gh commands from removal
-    expect(prompt).not.toMatch(/gh issue list {2}/);
-  });
-
-  it("parallel-planner plan-prompt.md strips --label Sandcastle when createLabel is false", async () => {
-    const dir = await makeDir();
-    await runScaffold(dir, {
-      templateName: "parallel-planner",
-      createLabel: false,
-    });
-
-    const prompt = await readFile(
-      join(dir, ".sandcastle", "plan-prompt.md"),
-      "utf-8",
-    );
-    expect(prompt).not.toContain("--label Sandcastle");
-    expect(prompt).toContain("gh issue list");
-  });
-
-  it("sequential-reviewer implement-prompt.md strips --label Sandcastle when createLabel is false", async () => {
-    const dir = await makeDir();
-    await runScaffold(dir, {
-      templateName: "sequential-reviewer",
-      createLabel: false,
-    });
+    await runScaffold(dir, { templateName: "standard", createLabel: false });
 
     const prompt = await readFile(
       join(dir, ".sandcastle", "implement-prompt.md"),
@@ -1365,12 +1027,28 @@ describe("InitService scaffold", () => {
     );
     expect(prompt).not.toContain("--label Sandcastle");
     expect(prompt).toContain("gh issue list");
+    expect(prompt).not.toMatch(/gh issue list {2}/);
   });
 
-  it("sequential-reviewer main.mts strips --label Sandcastle when createLabel is false", async () => {
+  it("planner recipe plan-prompt.md strips --label Sandcastle when createLabel is false", async () => {
     const dir = await makeDir();
     await runScaffold(dir, {
-      templateName: "sequential-reviewer",
+      templateName: "standard",
+      createLabel: false,
+    });
+
+    const prompt = await readFile(
+      join(dir, ".sandcastle", "recipes", "planner", "plan-prompt.md"),
+      "utf-8",
+    );
+    expect(prompt).not.toContain("--label Sandcastle");
+    expect(prompt).toContain("gh issue list");
+  });
+
+  it("standard main.mts strips --label Sandcastle when createLabel is false", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      templateName: "standard",
       createLabel: false,
     });
 
@@ -1385,15 +1063,12 @@ describe("InitService scaffold", () => {
   it("scaffolded prompts that lack a runtime TASK_ID do not contain {{TASK_ID}}", async () => {
     // Regression test for #477: the {{TASK_ID}} placeholder inside
     // VIEW_TASK_COMMAND / CLOSE_TASK_COMMAND used to leak into prompts
-    // whose runtime promptArgs do not include TASK_ID (simple-loop,
-    // sequential-reviewer's implement, parallel-planner*'s merge),
+    // whose runtime promptArgs do not include TASK_ID (standard implement,
+    // blank prompt),
     // causing PromptArgumentSubstitution to throw on every iteration.
     const cases: Array<{ template: string; file: string }> = [
-      { template: "simple-loop", file: "prompt.md" },
-      { template: "sequential-reviewer", file: "implement-prompt.md" },
-      { template: "sequential-reviewer-head", file: "implement-prompt.md" },
-      { template: "parallel-planner", file: "merge-prompt.md" },
-      { template: "parallel-planner-with-review", file: "merge-prompt.md" },
+      { template: "standard", file: "implement-prompt.md" },
+      { template: "blank", file: "prompt.md" },
     ];
     for (const { template, file } of cases) {
       const dir = await makeDir();
@@ -1405,10 +1080,10 @@ describe("InitService scaffold", () => {
 
   it("createLabel defaults to true (label retained when not specified)", async () => {
     const dir = await makeDir();
-    await runScaffold(dir, { templateName: "simple-loop" });
+    await runScaffold(dir, { templateName: "standard" });
 
     const prompt = await readFile(
-      join(dir, ".sandcastle", "prompt.md"),
+      join(dir, ".sandcastle", "implement-prompt.md"),
       "utf-8",
     );
     expect(prompt).toContain("--label Sandcastle");
@@ -1419,366 +1094,6 @@ describe("InitService scaffold", () => {
     await expect(
       runScaffold(dir, { templateName: "nonexistent" }),
     ).rejects.toThrow("nonexistent");
-  });
-
-  describe("parallel-planner template", () => {
-    it("produces main.mts, plan-prompt.md, implement-prompt.md, merge-prompt.md", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner" });
-
-      const configDir = join(dir, ".sandcastle");
-      const { access } = await import("node:fs/promises");
-
-      await expect(
-        access(join(configDir, "main.mts")),
-      ).resolves.toBeUndefined();
-      await expect(
-        access(join(configDir, "plan-prompt.md")),
-      ).resolves.toBeUndefined();
-      await expect(
-        access(join(configDir, "implement-prompt.md")),
-      ).resolves.toBeUndefined();
-      await expect(
-        access(join(configDir, "merge-prompt.md")),
-      ).resolves.toBeUndefined();
-    });
-
-    it("main.mts imports sandcastle and does not default to npm install", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner" });
-
-      const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      expect(mainTs).not.toContain('command: "npm install"');
-      expect(mainTs).toContain("sandcastle");
-    });
-
-    it("main.mts imports from @yogioo/sandcastle", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner" });
-
-      const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      expect(mainTs).toContain('"@yogioo/sandcastle"');
-    });
-
-    it("main.mts uses no-arg factory calls so the CLI default model is used", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner" });
-
-      const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      expect(mainTs).toContain("claudeCode()");
-      expect(mainTs).not.toContain('claudeCode("');
-    });
-
-    it("main.mts keeps prompt-argument placeholders that are not issue-tracker template args", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner" });
-
-      const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      expect(mainTs).toContain("{{BRANCHES}}");
-      expect(mainTs).toContain("{{ISSUES}}");
-      expect(mainTs).toContain("{{TASK_ID}}");
-    });
-
-    it("implement-prompt.md contains {{TASK_ID}}, {{ISSUE_TITLE}}, {{BRANCH}} prompt arguments", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner" });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("{{TASK_ID}}");
-      expect(prompt).toContain("{{ISSUE_TITLE}}");
-      expect(prompt).toContain("{{BRANCH}}");
-    });
-
-    it("merge-prompt.md contains {{BRANCHES}} and {{ISSUES}} prompt arguments", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner" });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "merge-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("{{BRANCHES}}");
-      expect(prompt).toContain("{{ISSUES}}");
-    });
-
-    it("main.mts always uses the merge agent regardless of branch count", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner" });
-
-      const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      expect(mainTs).not.toContain("completedBranches.length === 1");
-    });
-
-    it("common files are still generated with parallel-planner template", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner" });
-
-      const configDir = join(dir, ".sandcastle");
-      const dockerfile = await readFile(join(configDir, "Dockerfile"), "utf-8");
-      expect(dockerfile).toContain("FROM node:22-bookworm");
-      expect(dockerfile).not.toContain("{{ISSUE_TRACKER_TOOLS}}");
-
-      const env = await readFile(join(configDir, ".env"), "utf-8");
-      // Dynamic env: claude-code agent → CLAUDE_CODE_OAUTH_TOKEN, default issue tracker → GH_TOKEN
-      expect(env).toContain("# CLAUDE_CODE_OAUTH_TOKEN=");
-      expect(env).toContain("# GH_TOKEN=");
-      expect(uncommentedAssignments(env)).toEqual([]);
-    });
-  });
-
-  describe("parallel-planner-with-review template", () => {
-    it("produces main.mts, plan-prompt.md, implement-prompt.md, review-prompt.md, merge-prompt.md", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
-
-      const configDir = join(dir, ".sandcastle");
-      const { access } = await import("node:fs/promises");
-
-      await expect(
-        access(join(configDir, "main.mts")),
-      ).resolves.toBeUndefined();
-      await expect(
-        access(join(configDir, "plan-prompt.md")),
-      ).resolves.toBeUndefined();
-      await expect(
-        access(join(configDir, "implement-prompt.md")),
-      ).resolves.toBeUndefined();
-      await expect(
-        access(join(configDir, "review-prompt.md")),
-      ).resolves.toBeUndefined();
-      await expect(
-        access(join(configDir, "merge-prompt.md")),
-      ).resolves.toBeUndefined();
-    });
-
-    it("main.mts imports from @yogioo/sandcastle", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
-
-      const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      expect(mainTs).toContain('"@yogioo/sandcastle"');
-    });
-
-    it("main.mts uses createSandbox for shared sandbox per branch", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
-
-      const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      expect(mainTs).toContain("createSandbox");
-      expect(mainTs).toContain("sandbox.run");
-      expect(mainTs).toContain("sandbox.close");
-    });
-
-    it("main.mts runs implementer then reviewer sequentially within each sandbox", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
-
-      const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      expect(mainTs).toContain("implement-prompt.md");
-      expect(mainTs).toContain("review-prompt.md");
-      expect(mainTs).toContain("implement.commits.length > 0");
-    });
-
-    it("main.mts captures reviewer result and merges commits from both runs", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
-
-      const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      // Reviewer result must be captured, not discarded
-      expect(mainTs).toContain("const review = await sandbox.run");
-      // Commits from both implementer and reviewer must be merged
-      expect(mainTs).toContain("implement.commits");
-      expect(mainTs).toContain("review.commits");
-    });
-
-    it("main.mts uses Promise.allSettled for parallel execution", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
-
-      const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      expect(mainTs).toContain("Promise.allSettled");
-    });
-
-    it("main.mts has correct maxIterations: planner=1, implementer=100, reviewer=1, merger=1", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
-
-      const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      // Check planner maxIterations: 1 (near "planner" name)
-      const plannerSection = mainTs.slice(
-        mainTs.indexOf('name: "planner"') - 200,
-        mainTs.indexOf('name: "planner"') + 200,
-      );
-      expect(plannerSection).toContain("maxIterations: 1");
-
-      // Check implementer maxIterations: 100
-      const implementerSection = mainTs.slice(
-        mainTs.indexOf('name: "implementer"') - 200,
-        mainTs.indexOf('name: "implementer"') + 200,
-      );
-      expect(implementerSection).toContain("maxIterations: 100");
-
-      // Check reviewer maxIterations: 1
-      const reviewerSection = mainTs.slice(
-        mainTs.indexOf('name: "reviewer"') - 200,
-        mainTs.indexOf('name: "reviewer"') + 200,
-      );
-      expect(reviewerSection).toContain("maxIterations: 1");
-
-      // Check merger maxIterations: 1
-      const mergerSection = mainTs.slice(
-        mainTs.indexOf('name: "merger"') - 200,
-        mainTs.indexOf('name: "merger"') + 200,
-      );
-      expect(mergerSection).toContain("maxIterations: 1");
-    });
-
-    it("implement-prompt.md contains {{TASK_ID}}, {{ISSUE_TITLE}}, {{BRANCH}} prompt arguments", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("{{TASK_ID}}");
-      expect(prompt).toContain("{{ISSUE_TITLE}}");
-      expect(prompt).toContain("{{BRANCH}}");
-    });
-
-    it("review-prompt.md contains {{BRANCH}} prompt argument", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "review-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("{{BRANCH}}");
-    });
-
-    it("merge-prompt.md contains {{BRANCHES}} and {{ISSUES}} prompt arguments", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "merge-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("{{BRANCHES}}");
-      expect(prompt).toContain("{{ISSUES}}");
-    });
-
-    it("parallel-planner-with-review appears in listTemplates()", () => {
-      const templates = listTemplates();
-      expect(
-        templates.some((t) => t.name === "parallel-planner-with-review"),
-      ).toBe(true);
-    });
-
-    it("common files are still generated", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
-
-      const configDir = join(dir, ".sandcastle");
-      const dockerfile = await readFile(join(configDir, "Dockerfile"), "utf-8");
-      expect(dockerfile).toContain("FROM node:22-bookworm");
-      expect(dockerfile).not.toContain("{{ISSUE_TRACKER_TOOLS}}");
-
-      const env = await readFile(join(configDir, ".env"), "utf-8");
-      // Dynamic env: claude-code agent → CLAUDE_CODE_OAUTH_TOKEN, default issue tracker → GH_TOKEN
-      expect(env).toContain("# CLAUDE_CODE_OAUTH_TOKEN=");
-      expect(env).toContain("# GH_TOKEN=");
-      expect(uncommentedAssignments(env)).toEqual([]);
-    });
-
-    it("main.mts uses no-arg factory calls so the CLI default model is used", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
-
-      const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      expect(mainTs).toContain("claudeCode()");
-      expect(mainTs).not.toContain('claudeCode("');
-    });
-
-    it("scaffolds CODING_STANDARDS.md with minimal starter content", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
-
-      const standards = await readFile(
-        join(dir, ".sandcastle", "CODING_STANDARDS.md"),
-        "utf-8",
-      );
-      expect(standards).toContain("# Coding Standards");
-      expect(standards).toContain("Customize");
-    });
-
-    it("review-prompt.md references @.sandcastle/CODING_STANDARDS.md", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "review-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("@.sandcastle/CODING_STANDARDS.md");
-    });
-
-    it("review-prompt.md diffs against {{TARGET_BRANCH}} (the fork point), not the branch itself", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "review-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("git diff {{TARGET_BRANCH}}...{{BRANCH}}");
-      expect(prompt).toContain("git log {{TARGET_BRANCH}}..{{BRANCH}}");
-      // SOURCE_BRANCH equals BRANCH at run time, so diffing against it is
-      // always empty — the prompt must use TARGET_BRANCH instead.
-      expect(prompt).not.toContain("{{SOURCE_BRANCH}}");
-      expect(prompt).not.toContain("git diff main");
-      expect(prompt).not.toContain("git log main");
-    });
   });
 
   // --- Issue tracker ---
@@ -1905,15 +1220,15 @@ describe("InitService scaffold", () => {
   });
 
   describe("Issue tracker scaffold", () => {
-    it("simple-loop with github-issues produces prompt with gh issue commands (richer version)", async () => {
+    it("standard with github-issues produces implement-prompt with gh issue commands (richer version)", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
-        templateName: "simple-loop",
+        templateName: "standard",
         issueTracker: getIssueTracker("github-issues"),
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "prompt.md"),
+        join(dir, ".sandcastle", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("gh issue list");
@@ -1924,15 +1239,15 @@ describe("InitService scaffold", () => {
       expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
     });
 
-    it("simple-loop with beads produces prompt with bd commands", async () => {
+    it("standard with beads produces implement-prompt with bd commands", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
-        templateName: "simple-loop",
+        templateName: "standard",
         issueTracker: getIssueTracker("beads"),
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "prompt.md"),
+        join(dir, ".sandcastle", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("bd ready --json");
@@ -1943,45 +1258,45 @@ describe("InitService scaffold", () => {
       expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
     });
 
-    it("simple-loop with beads skips --label Sandcastle (no label to strip)", async () => {
+    it("standard with beads skips --label Sandcastle (no label to strip)", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
-        templateName: "simple-loop",
+        templateName: "standard",
         issueTracker: getIssueTracker("beads"),
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "prompt.md"),
+        join(dir, ".sandcastle", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).not.toContain("--label Sandcastle");
     });
 
-    it("simple-loop with github-issues retains --label Sandcastle when createLabel is true", async () => {
+    it("standard with github-issues retains --label Sandcastle when createLabel is true", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
-        templateName: "simple-loop",
+        templateName: "standard",
         issueTracker: getIssueTracker("github-issues"),
         createLabel: true,
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "prompt.md"),
+        join(dir, ".sandcastle", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("--label Sandcastle");
     });
 
-    it("simple-loop with github-issues strips --label Sandcastle when createLabel is false", async () => {
+    it("standard with github-issues strips --label Sandcastle when createLabel is false", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
-        templateName: "simple-loop",
+        templateName: "standard",
         issueTracker: getIssueTracker("github-issues"),
         createLabel: false,
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "prompt.md"),
+        join(dir, ".sandcastle", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).not.toContain("--label Sandcastle");
@@ -1990,10 +1305,10 @@ describe("InitService scaffold", () => {
 
     it("scaffold without issueTracker defaults to github-issues", async () => {
       const dir = await makeDir();
-      await runScaffold(dir, { templateName: "simple-loop" });
+      await runScaffold(dir, { templateName: "standard" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "prompt.md"),
+        join(dir, ".sandcastle", "implement-prompt.md"),
         "utf-8",
       );
       // Should default to github-issues and replace placeholders
@@ -2001,23 +1316,23 @@ describe("InitService scaffold", () => {
       expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
     });
 
-    it("simple-loop prompt uses backlog-agnostic language", async () => {
+    it("standard implement-prompt uses backlog-agnostic language", async () => {
       const dir = await makeDir();
-      await runScaffold(dir, { templateName: "simple-loop" });
+      await runScaffold(dir, { templateName: "standard" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "prompt.md"),
+        join(dir, ".sandcastle", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).not.toContain("GitHub issue");
     });
 
-    it("simple-loop prompt hints the issue list is pre-filtered and discourages unfiltered re-query", async () => {
+    it("standard implement-prompt hints the issue list is pre-filtered and discourages unfiltered re-query", async () => {
       const dir = await makeDir();
-      await runScaffold(dir, { templateName: "simple-loop" });
+      await runScaffold(dir, { templateName: "standard" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "prompt.md"),
+        join(dir, ".sandcastle", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain(
@@ -2034,7 +1349,7 @@ describe("InitService scaffold", () => {
     it("custom scaffolds .sandcastle/SETUP_ISSUE_TRACKER.md", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
-        templateName: "simple-loop",
+        templateName: "standard",
         issueTracker: customManager,
       });
 
@@ -2058,7 +1373,7 @@ describe("InitService scaffold", () => {
     it("custom SETUP doc references the chosen provider's build-image command", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
-        templateName: "simple-loop",
+        templateName: "standard",
         issueTracker: customManager,
         sandboxProvider: getSandboxProvider("podman"),
       });
@@ -2074,7 +1389,7 @@ describe("InitService scaffold", () => {
     it("custom host-only setup skips container instructions", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
-        templateName: "simple-loop",
+        templateName: "standard",
         issueTracker: customManager,
         sandboxProvider: getSandboxProvider("no-sandbox"),
       });
@@ -2091,7 +1406,7 @@ describe("InitService scaffold", () => {
     it("non-custom issue trackers do not scaffold SETUP_ISSUE_TRACKER.md", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
-        templateName: "simple-loop",
+        templateName: "standard",
         issueTracker: getIssueTracker("github-issues"),
       });
 
@@ -2104,7 +1419,7 @@ describe("InitService scaffold", () => {
     it("custom Dockerfile leaves a TODO install block instead of a real CLI", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
-        templateName: "simple-loop",
+        templateName: "standard",
         issueTracker: customManager,
       });
 
@@ -2119,15 +1434,15 @@ describe("InitService scaffold", () => {
       expect(dockerfile).not.toContain("GitHub CLI");
     });
 
-    it("custom simple-loop prompt hard-fails the list command with a pointer to the doc", async () => {
+    it("custom standard implement-prompt hard-fails the list command with a pointer to the doc", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
-        templateName: "simple-loop",
+        templateName: "standard",
         issueTracker: customManager,
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "prompt.md"),
+        join(dir, ".sandcastle", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("exit 1");
@@ -2138,7 +1453,7 @@ describe("InitService scaffold", () => {
     it("custom .env carries a TODO for tracker env vars", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
-        templateName: "simple-loop",
+        templateName: "standard",
         issueTracker: customManager,
       });
 
@@ -2147,50 +1462,10 @@ describe("InitService scaffold", () => {
       expect(env).toContain("SETUP_ISSUE_TRACKER.md");
     });
 
-    // --- sequential-reviewer ---
-
-    it("sequential-reviewer with github-issues produces implement-prompt with gh issue commands", async () => {
+    it("standard main.mts substitutes LIST_TASKS_COMMAND for host-side polling", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
-        templateName: "sequential-reviewer",
-        issueTracker: getIssueTracker("github-issues"),
-      });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("gh issue list");
-      expect(prompt).toContain("labels");
-      expect(prompt).toContain("comments");
-      expect(prompt).toContain("gh issue close");
-      expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
-      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
-    });
-
-    it("sequential-reviewer with beads produces implement-prompt with bd commands", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, {
-        templateName: "sequential-reviewer",
-        issueTracker: getIssueTracker("beads"),
-      });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("bd ready --json");
-      expect(prompt).toContain("bd close");
-      expect(prompt).not.toContain("gh issue list");
-      expect(prompt).not.toContain("gh issue close");
-      expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
-      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
-    });
-
-    it("sequential-reviewer main.mts substitutes LIST_TASKS_COMMAND for host-side polling", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, {
-        templateName: "sequential-reviewer",
+        templateName: "standard",
         issueTracker: getIssueTracker("beads"),
       });
 
@@ -2201,17 +1476,6 @@ describe("InitService scaffold", () => {
       expect(mainTs).toContain("bd ready --json");
       expect(mainTs).not.toContain("{{LIST_TASKS_COMMAND}}");
       expect(mainTs).not.toContain("gh issue list");
-    });
-
-    it("sequential-reviewer implement-prompt uses backlog-agnostic language", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "sequential-reviewer" });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).not.toContain("GitHub issue");
     });
 
     // --- blank ---
@@ -2247,348 +1511,75 @@ describe("InitService scaffold", () => {
       expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
     });
 
-    // --- parallel-planner ---
+    // --- planner recipe ---
 
-    it("parallel-planner with github-issues produces plan-prompt with gh issue commands", async () => {
+    it("planner recipe plan-prompt substitutes github-issues list command", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
-        templateName: "parallel-planner",
+        templateName: "standard",
         issueTracker: getIssueTracker("github-issues"),
       });
 
       const planPrompt = await readFile(
-        join(dir, ".sandcastle", "plan-prompt.md"),
+        join(dir, ".sandcastle", "recipes", "planner", "plan-prompt.md"),
         "utf-8",
       );
       expect(planPrompt).toContain("gh issue list");
-      expect(planPrompt).toContain("labels");
-      expect(planPrompt).toContain("comments");
       expect(planPrompt).not.toContain("{{LIST_TASKS_COMMAND}}");
     });
 
-    it("parallel-planner with beads produces plan-prompt with bd commands", async () => {
+    it("planner recipe plan-prompt substitutes beads list command", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
-        templateName: "parallel-planner",
+        templateName: "standard",
         issueTracker: getIssueTracker("beads"),
       });
 
       const planPrompt = await readFile(
-        join(dir, ".sandcastle", "plan-prompt.md"),
+        join(dir, ".sandcastle", "recipes", "planner", "plan-prompt.md"),
         "utf-8",
       );
       expect(planPrompt).toContain("bd ready --json");
-      expect(planPrompt).not.toContain("gh issue");
       expect(planPrompt).not.toContain("{{LIST_TASKS_COMMAND}}");
     });
 
-    it("parallel-planner main.mts uses id:string and TASK_ID", async () => {
+    it("planner recipe main uses id:string, TASK_ID, and Output.object for the plan", async () => {
       const dir = await makeDir();
-      await runScaffold(dir, {
-        templateName: "parallel-planner",
-      });
+      await runScaffold(dir, { templateName: "standard" });
 
       const main = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".sandcastle", "recipes", "planner", "main.mts"),
         "utf-8",
       );
       expect(main).toContain("id: z.string()");
       expect(main).toContain("TASK_ID: issue.id");
-      expect(main).not.toContain("number: number");
-      expect(main).not.toContain("ISSUE_NUMBER");
-      expect(main).not.toContain("`  #${");
-    });
-
-    it("parallel-planner main.mts uses Output.object for the plan", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, {
-        templateName: "parallel-planner",
-      });
-
-      const main = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
       expect(main).toContain("Output.object");
       expect(main).toContain('tag: "plan"');
-      expect(main).toContain("plan.output.issues");
-      expect(main).toContain('from "zod"');
-      expect(main).toContain("z.object");
       expect(main).not.toContain("extractPlanIssues");
     });
 
-    it("parallel-planner implement-prompt uses TASK_ID placeholder", async () => {
+    it("planner recipe implement-prompt keeps {{TASK_ID}} and substitutes view/close", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
-        templateName: "parallel-planner",
-      });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("{{TASK_ID}}");
-      expect(prompt).not.toContain("{{ISSUE_NUMBER}}");
-    });
-
-    it("parallel-planner with github-issues produces implement-prompt with gh issue view", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, {
-        templateName: "parallel-planner",
+        templateName: "standard",
         issueTracker: getIssueTracker("github-issues"),
       });
 
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+      const implement = await readFile(
+        join(dir, ".sandcastle", "recipes", "planner", "implement-prompt.md"),
         "utf-8",
       );
-      expect(prompt).toContain("gh issue view");
-      expect(prompt).not.toContain("{{VIEW_TASK_COMMAND}}");
-    });
+      expect(implement).toContain("{{TASK_ID}}");
+      expect(implement).toContain("gh issue view");
+      expect(implement).not.toContain("{{VIEW_TASK_COMMAND}}");
+      expect(implement).not.toContain("{{CLOSE_TASK_COMMAND}}");
 
-    it("parallel-planner with beads produces implement-prompt with bd show", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, {
-        templateName: "parallel-planner",
-        issueTracker: getIssueTracker("beads"),
-      });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+      const merge = await readFile(
+        join(dir, ".sandcastle", "recipes", "planner", "merge-prompt.md"),
         "utf-8",
       );
-      expect(prompt).toContain("bd show");
-      expect(prompt).not.toContain("gh issue");
-      expect(prompt).not.toContain("{{VIEW_TASK_COMMAND}}");
-    });
-
-    it("parallel-planner with github-issues produces merge-prompt with gh issue close", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, {
-        templateName: "parallel-planner",
-        issueTracker: getIssueTracker("github-issues"),
-      });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "merge-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("gh issue close");
-      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
-    });
-
-    it("parallel-planner with beads produces merge-prompt with bd close", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, {
-        templateName: "parallel-planner",
-        issueTracker: getIssueTracker("beads"),
-      });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "merge-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("bd close");
-      expect(prompt).not.toContain("gh issue");
-      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
-    });
-
-    it("parallel-planner implement-prompt does not contain close-issue instruction", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, { templateName: "parallel-planner" });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).not.toContain("close the issue when done");
-      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
-    });
-
-    it("parallel-planner implement-prompt uses backlog-agnostic language", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, {
-        templateName: "parallel-planner",
-      });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).not.toContain("GitHub issue");
-    });
-
-    // --- parallel-planner-with-review ---
-
-    it("parallel-planner-with-review with github-issues produces plan-prompt with gh issue commands", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, {
-        templateName: "parallel-planner-with-review",
-        issueTracker: getIssueTracker("github-issues"),
-      });
-
-      const planPrompt = await readFile(
-        join(dir, ".sandcastle", "plan-prompt.md"),
-        "utf-8",
-      );
-      expect(planPrompt).toContain("gh issue list");
-      expect(planPrompt).toContain("labels");
-      expect(planPrompt).toContain("comments");
-      expect(planPrompt).not.toContain("{{LIST_TASKS_COMMAND}}");
-    });
-
-    it("parallel-planner-with-review with beads produces plan-prompt with bd commands", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, {
-        templateName: "parallel-planner-with-review",
-        issueTracker: getIssueTracker("beads"),
-      });
-
-      const planPrompt = await readFile(
-        join(dir, ".sandcastle", "plan-prompt.md"),
-        "utf-8",
-      );
-      expect(planPrompt).toContain("bd ready --json");
-      expect(planPrompt).not.toContain("gh issue");
-      expect(planPrompt).not.toContain("{{LIST_TASKS_COMMAND}}");
-    });
-
-    it("parallel-planner-with-review main.mts uses id:string and TASK_ID", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, {
-        templateName: "parallel-planner-with-review",
-      });
-
-      const main = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      expect(main).toContain("id: z.string()");
-      expect(main).toContain("TASK_ID: issue.id");
-      expect(main).not.toContain("number: number");
-      expect(main).not.toContain("ISSUE_NUMBER");
-      expect(main).not.toContain("`  #${");
-    });
-
-    it("parallel-planner-with-review main.mts uses Output.object for the plan", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, {
-        templateName: "parallel-planner-with-review",
-      });
-
-      const main = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      expect(main).toContain("Output.object");
-      expect(main).toContain('tag: "plan"');
-      expect(main).toContain("plan.output.issues");
-      expect(main).toContain('from "zod"');
-      expect(main).toContain("z.object");
-      expect(main).not.toContain("extractPlanIssues");
-    });
-
-    it("parallel-planner-with-review implement-prompt does not contain close-issue instruction", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, {
-        templateName: "parallel-planner-with-review",
-      });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).not.toContain("close the issue when done");
-      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
-    });
-
-    it("parallel-planner-with-review implement-prompt uses TASK_ID placeholder", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, {
-        templateName: "parallel-planner-with-review",
-      });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("{{TASK_ID}}");
-      expect(prompt).not.toContain("{{ISSUE_NUMBER}}");
-    });
-
-    it("parallel-planner-with-review with github-issues produces implement-prompt with gh issue view", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, {
-        templateName: "parallel-planner-with-review",
-        issueTracker: getIssueTracker("github-issues"),
-      });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("gh issue view");
-      expect(prompt).not.toContain("{{VIEW_TASK_COMMAND}}");
-    });
-
-    it("parallel-planner-with-review with beads produces implement-prompt with bd show", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, {
-        templateName: "parallel-planner-with-review",
-        issueTracker: getIssueTracker("beads"),
-      });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("bd show");
-      expect(prompt).not.toContain("gh issue");
-      expect(prompt).not.toContain("{{VIEW_TASK_COMMAND}}");
-    });
-
-    it("parallel-planner-with-review with github-issues produces merge-prompt with gh issue close", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, {
-        templateName: "parallel-planner-with-review",
-        issueTracker: getIssueTracker("github-issues"),
-      });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "merge-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("gh issue close");
-      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
-    });
-
-    it("parallel-planner-with-review with beads produces merge-prompt with bd close", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, {
-        templateName: "parallel-planner-with-review",
-        issueTracker: getIssueTracker("beads"),
-      });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "merge-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).toContain("bd close");
-      expect(prompt).not.toContain("gh issue");
-      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
-    });
-
-    it("parallel-planner-with-review implement-prompt uses backlog-agnostic language", async () => {
-      const dir = await makeDir();
-      await runScaffold(dir, {
-        templateName: "parallel-planner-with-review",
-      });
-
-      const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
-      );
-      expect(prompt).not.toContain("GitHub issue");
+      expect(merge).toContain("gh issue close");
+      expect(merge).not.toContain("{{CLOSE_TASK_COMMAND}}");
     });
 
     // --- Dockerfile issue tracker tools ---
@@ -2764,7 +1755,7 @@ describe("InitService scaffold", () => {
         join(dir, "package.json"),
         JSON.stringify({ name: "test", type: "module" }),
       );
-      await runScaffold(dir);
+      await runScaffold(dir, { templateName: "blank" });
 
       const mainContent = await readFile(
         join(dir, ".sandcastle", "main.ts"),
@@ -2837,7 +1828,10 @@ describe("InitService scaffold", () => {
 
     it("selecting podman rewrites the main file to import and call podman", async () => {
       const dir = await makeDir();
-      await runScaffold(dir, { sandboxProvider: podmanProvider });
+      await runScaffold(dir, {
+        sandboxProvider: podmanProvider,
+        templateName: "blank",
+      });
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
@@ -2850,25 +1844,36 @@ describe("InitService scaffold", () => {
       expect(mainTs).not.toContain("docker");
     });
 
-    it("selecting podman rewrites every docker() call site", async () => {
+    it("selecting podman rewrites docker() call sites on root and recipe mains", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
         sandboxProvider: podmanProvider,
-        templateName: "parallel-planner",
+        templateName: "standard",
       });
 
-      const mainTs = await readFile(
+      const rootMain = await readFile(
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).not.toContain("docker");
-      // parallel-planner calls the factory three times
-      expect(mainTs.match(/sandbox: podman\(\)/g)).toHaveLength(3);
+      expect(rootMain).not.toContain("docker");
+      expect(rootMain).toContain("podman(");
+
+      const recipeMain = await readFile(
+        join(dir, ".sandcastle", "recipes", "planner", "main.mts"),
+        "utf-8",
+      );
+      expect(recipeMain).not.toContain("docker");
+      expect(
+        recipeMain.match(/sandbox: podman\(/g)?.length,
+      ).toBeGreaterThanOrEqual(3);
     });
 
     it("selecting docker leaves the main file importing and calling docker", async () => {
       const dir = await makeDir();
-      await runScaffold(dir, { sandboxProvider: dockerProvider });
+      await runScaffold(dir, {
+        sandboxProvider: dockerProvider,
+        templateName: "blank",
+      });
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
@@ -2913,10 +1918,10 @@ describe("InitService scaffold", () => {
       expect(mainTs).not.toContain("docker");
     });
 
-    it("useWorktree false rewrites simple-loop to head mode without copyToWorktree", async () => {
+    it("useWorktree false keeps standard on head without copyToWorktree", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
-        templateName: "simple-loop",
+        templateName: "standard",
         useWorktree: false,
       });
 
@@ -2929,56 +1934,9 @@ describe("InitService scaffold", () => {
       expect(mainTs).not.toContain("copyToWorktree");
     });
 
-    it("rejects no-worktree for templates that require worktrees", async () => {
-      expect(
-        validateScaffoldOptions({
-          agent: claudeCodeAgent,
-          model: "claude-opus-4-8",
-          templateName: "parallel-planner",
-          useWorktree: false,
-        }),
-      ).toContain("requires git worktrees");
-
-      expect(
-        validateScaffoldOptions({
-          agent: claudeCodeAgent,
-          model: "claude-opus-4-8",
-          templateName: "sequential-reviewer",
-          useWorktree: false,
-        }),
-      ).toContain("requires git worktrees");
-
-      const dir = await makeDir();
-      await expect(
-        runScaffold(dir, {
-          templateName: "sequential-reviewer",
-          useWorktree: false,
-        }),
-      ).rejects.toThrow("requires git worktrees");
-    });
-
-    it("allows useWorktree false for head templates", () => {
-      expect(
-        validateScaffoldOptions({
-          agent: claudeCodeAgent,
-          model: "claude-opus-4-8",
-          templateName: "simple-loop-head",
-          useWorktree: false,
-        }),
-      ).toBeUndefined();
-      expect(
-        validateScaffoldOptions({
-          agent: claudeCodeAgent,
-          model: "claude-opus-4-8",
-          templateName: "sequential-reviewer-head",
-          useWorktree: false,
-        }),
-      ).toBeUndefined();
-    });
-
     it("no-worktree next steps omit copyToWorktree guidance", () => {
       const lines = getNextStepsLines(
-        "simple-loop",
+        "standard",
         "main.mts",
         getIssueTracker("github-issues")!,
         claudeCodeAgent,

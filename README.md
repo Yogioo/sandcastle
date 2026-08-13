@@ -841,23 +841,22 @@ try {
 
 ### 模板
 
-`sandcastle init` 会提示选择沙箱提供商（Docker、Podman 或不使用沙箱）、issue 跟踪器（GitHub Issues、Beads 或自定义）及模板，并将适合特定工作流的提示词与 `main.mts` 写入用户缓存状态目录。若项目 `package.json` 含 `"type": "module"`，文件名为 `main.ts`。选择 **自定义** 会生成故意未配置完成的状态，外加 `SETUP_ISSUE_TRACKER.md` 提示词，供编码代理接线你自己的跟踪器。Git 模式由模板决定（`*-head` 为直接写当前工作树；默认模板使用 worktree / `merge-to-head`）。共七种模板：
+`sandcastle init` 会提示选择沙箱提供商（Docker、Podman 或不使用沙箱）、issue 跟踪器（GitHub Issues、Beads 或自定义）及工作流模板，并将编排入口、提示词、**workflow guide**（`AGENTS.md`）与 **workflow recipes** 写入用户缓存状态目录。若项目 `package.json` 含 `"type": "module"`，入口文件名为 `main.ts`。选择 **自定义** 会生成故意未配置完成的状态，外加 `SETUP_ISSUE_TRACKER.md` 提示词，供编码代理接线你自己的跟踪器。代理、沙箱提供商、issue 跟踪器是正交的 init 选项，与工作流模板分开选择。
 
-| 模板                           | 说明                                                        |
-| ------------------------------ | ----------------------------------------------------------- |
-| `blank`                        | 空白脚手架——自行编写提示词与编排                            |
-| `simple-loop`                  | 逐个选取 issue 并关闭（worktree / merge-to-head）           |
-| `simple-loop-head`             | 同上，但 `branchStrategy: { type: "head" }`，无 worktree    |
-| `sequential-reviewer`          | 逐个实现 issue，每步后代码审查（独立 worktree 分支）        |
-| `sequential-reviewer-head`     | 同上，但在当前 checkout 上实现→审查；审查看本轮 commit 范围 |
-| `parallel-planner`             | 规划可并行 issue，分分支执行后合并                          |
-| `parallel-planner-with-review` | 规划可并行 issue，每分支审查后合并                          |
+init 只提供两种工作流模板：
 
-在 `sandcastle init` 提示时选择模板，或在新仓库重新 init 尝试其他模板。使用 `--state-dir` 可以显式指定状态目录；CLI 不会因为找不到外部项目而回退到仓库内的旧 `.sandcastle`。
+| 模板       | 说明                                                                                          |
+| ---------- | --------------------------------------------------------------------------------------------- |
+| `standard` | **默认**。在当前 checkout（**head**）上实现→审查；审查看本轮 commit 范围；空转时宿主机轮询    |
+| `blank`    | 空白脚手架——自行编写提示词与编排                                                              |
 
-选择 `no-sandbox` 会使用 `noSandbox()`，代理命令直接在宿主机执行。需要 head 模式时选择 `simple-loop-head` 或 `sequential-reviewer-head`（直接修改当前工作目录）。`sequential-reviewer`、`parallel-planner` 和 `parallel-planner-with-review` 依赖独立 worktree，程序化传入 `useWorktree: false` 仍会被拒绝。
+init 之后 `@.sandcastle/AGENTS.md`，由代理按 recipe 目录改文件：加 **worktree** / **planner**（planner 依赖 worktree）、去掉审查、或重做沙箱提供商选择。不要在 `standard` 的 `main.ts` 里加功能开关矩阵。
 
-`sequential-reviewer` 与 `sequential-reviewer-head` 默认每 30 秒在宿主机上轮询 `LIST_TASKS_COMMAND`：没有可接工单时等待而不启动代理；有工单时才进入实现→审查。空转不计入 `MAX_ITERATIONS`。把生成的 `main` 里的 `IDLE_POLL_SECONDS` 设为 `0` 可改回 backlog 为空即退出。
+使用 `--state-dir` 可以显式指定状态目录；CLI 不会因为找不到外部项目而回退到仓库内的旧 `.sandcastle`。
+
+选择 `no-sandbox` 会使用 `noSandbox()`，代理命令直接在宿主机执行。`standard` 与 `blank` 都是 **head**，直接修改当前工作目录。要改用 named branch + `createSandbox`，init 之后按 `recipes/worktree/` 改，而不是再选一个模板。
+
+`standard` 默认每 30 秒在宿主机上轮询 `LIST_TASKS_COMMAND`：没有可接工单时等待而不启动代理；有工单时才进入实现→审查。空转不计入 `MAX_ITERATIONS`。把生成的 `main` 里的 `IDLE_POLL_SECONDS` 设为 `0` 可改回 backlog 为空即退出。
 
 ## CLI 命令
 
@@ -869,9 +868,9 @@ try {
 
 选择 beads 时，init 会校验宿主机 `bd` CLI 是否在 PATH 上（没有则报错），并在仓库尚未初始化 beads 数据库时询问是否运行 `bd init`。选否会取消 init。非交互模式用 `--init-beads true|false`。
 
-init 从 `packageManager` 字段或锁文件检测宿主机包管理器（npm、pnpm、yarn、bun），默认 npm。模板 `main` 若导入宿主机依赖——规划模板的 `<plan>` 与 sequential-reviewer 模板的 `<outcome>` 输出 schema 导入 [Zod](https://zod.dev)——会在 `package.json` 中尚未存在时提示用该包管理器安装，避免首次运行缓存目录中的 `main.ts` 出现 `ERR_MODULE_NOT_FOUND`。
+init 从 `packageManager` 字段或锁文件检测宿主机包管理器（npm、pnpm、yarn、bun），默认 npm。`standard` 的 `main` 为 `<outcome>` 输出 schema 导入 [Zod](https://zod.dev)——会在 `package.json` 中尚未存在时提示用该包管理器安装，避免首次运行缓存目录中的 `main.ts` 出现 `ERR_MODULE_NOT_FOUND`。
 
-init 的主要选项会在交互界面中选择；同时保留已有的 `--flag` 以支持 CI 和脚本。Git 模式不再作为独立交互选项——通过模板选择（`*-head` vs 默认）。stdin 非 TTY 且缺少必填 flag 时，init 快速失败并给出明确错误，而非卡在提示上。
+init 的主要选项会在交互界面中选择；同时保留已有的 `--flag` 以支持 CI 和脚本。`standard` 使用 **head**；**worktree** 在 init 之后通过 workflow recipe 添加。stdin 非 TTY 且缺少必填 flag 时，init 快速失败并给出明确错误，而非卡在提示上。
 
 | 选项                      | 必填 | 默认值                       | 说明                                                                                      |
 | ------------------------- | ---- | ---------------------------- | ----------------------------------------------------------------------------------------- |
@@ -879,11 +878,11 @@ init 的主要选项会在交互界面中选择；同时保留已有的 `--flag`
 | `--agent`                 | 否   | 交互提示                     | 代理（`claude-code`、`pi`、`codex`、`cursor`、`opencode`、`copilot`）                     |
 | `--model`                 | 否   | 省略（CLI 默认模型）         | 写入 `main.mts` 的模型（如 `claude-sonnet-4-6`）；省略则生成 `pi()` / `claudeCode()`      |
 | `--sandbox`               | 否   | 交互提示                     | 沙箱提供商（`docker`、`podman`、`no-sandbox`）                                            |
-| `--template`              | 否   | 交互提示                     | 模板（如 `blank`、`simple-loop`、`sequential-reviewer-head`）                             |
+| `--template`              | 否   | 交互提示（默认 `standard`）  | 工作流模板（`standard` 或 `blank`）                                                       |
 | `--issue-tracker`         | 否   | 交互提示                     | issue 跟踪器（`github-issues`、`beads`、`custom`）                                        |
 | `--create-label`          | 否   | 交互提示                     | `true` / `false`——是否创建 `Sandcastle` GitHub 标签（仅 `github-issues`）                 |
 | `--build-image`           | 否   | 交互提示                     | `true` / `false`——是否立即构建沙箱镜像（`custom` 或 `no-sandbox` 时静默忽略）             |
-| `--install-template-deps` | 否   | 交互提示                     | `true` / `false`——是否安装模板宿主机依赖（如规划模板的 `zod`）                            |
+| `--install-template-deps` | 否   | 交互提示                     | `true` / `false`——是否安装模板宿主机依赖（如 `standard` 的 `zod`）                        |
 | `--init-git`              | 否   | 交互提示                     | `true` / `false`——目标没有可用 Git 仓库时，是否自动 `git init` 并创建初始 commit          |
 | `--init-beads`            | 否   | 交互提示                     | `true` / `false`——选择 beads 且仓库没有数据库时，是否自动 `bd init`（未安装 `bd` 则报错） |
 | `--state-dir`             | 否   | 用户缓存目录                 | 覆盖 Sandcastle 状态目录；CLI 不会自动回退到仓库内 `.sandcastle`                          |
@@ -892,12 +891,16 @@ init 的主要选项会在交互界面中选择；同时保留已有的 `--flag`
 
 ```
 .sandcastle/
-├── Dockerfile      # 沙箱环境（使用 no-sandbox 时不会生成）
-├── main.ts         # 代理工作流入口（非 ESM 项目为 main.mts）
-├── prompt.md       # 代理说明
-├── .env            # 令牌占位（默认注释，取消注释后填写）
-├── .dockerignore   # 防止凭据和运行时文件进入构建上下文
-└── .gitignore      # 忽略 .env、logs/、worktrees/、patches/
+├── Dockerfile           # 沙箱环境（使用 no-sandbox 时不会生成）
+├── AGENTS.md            # 工作流指南（workflow guide）
+├── main.ts              # 唯一可运行入口（非 ESM 项目为 main.mts）
+├── implement-prompt.md  # 实现阶段提示词（blank 则为 prompt.md）
+├── review-prompt.md
+├── CODING_STANDARDS.md
+├── recipes/             # worktree / planner / sandbox-provider
+├── .env                 # 令牌占位（默认注释，取消注释后填写）
+├── .dockerignore        # 防止凭据和运行时文件进入构建上下文
+└── .gitignore           # 忽略 .env、logs/、worktrees/、patches/
 ```
 
 若 `.sandcastle/` 已存在会报错，防止覆盖自定义内容。

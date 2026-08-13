@@ -182,9 +182,10 @@ describe("sandcastle CLI", () => {
       const output = stdout + stderr;
       expect(output).toContain("nonexistent");
       expect(output).toContain("blank");
-      expect(output).toContain("simple-loop");
-      expect(output).toContain("simple-loop-head");
-      expect(output).toContain("sequential-reviewer-head");
+      expect(output).toContain("standard");
+      expect(output).not.toContain("simple-loop");
+      expect(output).not.toContain("sequential-reviewer");
+      expect(output).not.toContain("parallel-planner");
     }
   });
 

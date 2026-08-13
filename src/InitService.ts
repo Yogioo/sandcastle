@@ -33,8 +33,8 @@ export interface TemplateMetadata {
   description: string;
   /**
    * Host-side npm packages the template's `main` file imports directly (e.g.
-   * planner and sequential-reviewer templates import `zod` for structured
-   * output schemas). Init offers to install these with the detected package
+   * the standard workflow template imports `zod` for structured output
+   * schemas). Init offers to install these with the detected package
    * manager so that `npx tsx .sandcastle/main.ts` doesn't crash with
    * ERR_MODULE_NOT_FOUND.
    */
@@ -43,41 +43,14 @@ export interface TemplateMetadata {
 
 const TEMPLATES: TemplateMetadata[] = [
   {
+    name: "standard",
+    description:
+      "Default implement→review loop on head (idle poll, commit-range review)",
+    dependencies: ["zod"],
+  },
+  {
     name: "blank",
     description: "Bare scaffold — write your own prompt and orchestration",
-  },
-  {
-    name: "simple-loop",
-    description: "Picks issues one by one and closes them",
-  },
-  {
-    name: "simple-loop-head",
-    description:
-      "Picks issues one by one and closes them (head mode, no worktree)",
-  },
-  {
-    name: "sequential-reviewer",
-    description:
-      "Implements issues one by one, with a code review step after each",
-    dependencies: ["zod"],
-  },
-  {
-    name: "sequential-reviewer-head",
-    description:
-      "Head-mode implement→review loop (commit-range review, no worktree)",
-    dependencies: ["zod"],
-  },
-  {
-    name: "parallel-planner",
-    description:
-      "Plans parallelizable issues, executes on separate branches, merges",
-    dependencies: ["zod"],
-  },
-  {
-    name: "parallel-planner-with-review",
-    description:
-      "Plans parallelizable issues, executes with per-branch review, merges",
-    dependencies: ["zod"],
   },
 ];
 
@@ -647,26 +620,6 @@ const SANDBOX_PROVIDER_REGISTRY: SandboxProviderEntry[] = [
   },
 ];
 
-/** Templates that always create git worktrees and cannot use head mode. */
-const WORKTREE_REQUIRED_TEMPLATES = new Set([
-  "sequential-reviewer",
-  "parallel-planner",
-  "parallel-planner-with-review",
-]);
-
-export const validateScaffoldOptions = (
-  options: ScaffoldOptions,
-): string | undefined => {
-  const templateName = options.templateName ?? "blank";
-  if (
-    options.useWorktree === false &&
-    WORKTREE_REQUIRED_TEMPLATES.has(templateName)
-  ) {
-    return `Template "${templateName}" requires git worktrees. Choose to use worktrees or pick blank/simple-loop/simple-loop-head/sequential-reviewer-head for head mode.`;
-  }
-  return undefined;
-};
-
 export const listSandboxProviders = (): SandboxProviderEntry[] =>
   SANDBOX_PROVIDER_REGISTRY;
 
@@ -757,7 +710,7 @@ export function getNextStepsLines(
     lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
     return formatStateLines(lines);
   } else {
-    const hasReviewer = template.includes("review");
+    // Non-blank is standard: head, with review. Worktree is a recipe, not init.
     const usesSchemaValidator =
       getTemplateDependencies(template).includes("zod");
     let step = 1;
@@ -773,19 +726,13 @@ export function getNextStepsLines(
     lines.push(
       `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
     );
-    // *-head templates are always head mode regardless of useWorktree default.
-    const isHeadTemplate = template.endsWith("-head") || !useWorktree;
     if (hostOnly) {
       lines.push(
         `${step++}. The agent runs directly on your host (no container). Ensure the agent CLI is installed and authenticated locally.`,
       );
-    } else if (isHeadTemplate) {
-      lines.push(
-        `${step++}. Head mode writes directly to your working tree — use a dedicated branch and review changes before merging.`,
-      );
     } else {
       lines.push(
-        `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup (missing paths are skipped). Add a \`sandbox.onSandboxReady\` install command if your project needs a package-manager install after the sandbox starts`,
+        `${step++}. Head mode writes directly to your working tree — use a dedicated branch and review changes before merging.`,
       );
     }
     if (usesSchemaValidator) {
@@ -796,14 +743,15 @@ export function getNextStepsLines(
     lines.push(
       `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
     );
-    if (hasReviewer) {
+    if (template === "standard") {
       lines.push(
         `${step++}. Customize .sandcastle/CODING_STANDARDS.md with your project's standards — the reviewer agent loads it during review`,
       );
-    }
-    if (template.startsWith("sequential-reviewer")) {
       lines.push(
         `${step++}. Optional: set \`IDLE_POLL_SECONDS\` in .sandcastle/${mainFilename} to 0 to exit when no issues are ready instead of polling`,
+      );
+      lines.push(
+        `${step++}. Read .sandcastle/AGENTS.md — the workflow guide for adding worktree or planner, stripping review, or switching sandbox provider`,
       );
     }
     lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
@@ -858,10 +806,51 @@ const COMPILED_FILE_EXTENSIONS = [
   ".d.mts.map",
 ];
 
+const basenameOf = (path: string): string =>
+  path.replace(/\\/g, "/").split("/").pop() ?? path;
+
+const isDirectory = (
+  path: string,
+): Effect.Effect<boolean, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    return yield* fs.stat(path).pipe(
+      Effect.map((s) => s.type === "Directory"),
+      Effect.mapError((e) => new Error(e.message)),
+    );
+  });
+
+const listFilesRecursive = (
+  dir: string,
+): Effect.Effect<string[], Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const entries = yield* fs
+      .readDirectory(dir)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+    const nested = yield* Effect.all(
+      entries.map((entry) =>
+        Effect.gen(function* () {
+          const path = join(dir, entry);
+          const dirFlag = yield* isDirectory(path);
+          if (dirFlag) return yield* listFilesRecursive(path);
+          return [path];
+        }),
+      ),
+      { concurrency: "unbounded" },
+    );
+    return nested.flat();
+  });
+
+const shouldSkipTemplateEntry = (name: string): boolean =>
+  name === "template.json" ||
+  COMPILED_FILE_EXTENSIONS.some((ext) => name.endsWith(ext));
+
 const copyTemplateFiles = (
   templateDir: string,
   destDir: string,
   mainFilename: string,
+  isRoot = true,
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -870,17 +859,25 @@ const copyTemplateFiles = (
       .pipe(Effect.mapError((e) => new Error(e.message)));
     yield* Effect.all(
       files
-        .filter(
-          (f) =>
-            f !== "template.json" &&
-            !COMPILED_FILE_EXTENSIONS.some((ext) => f.endsWith(ext)),
-        )
-        .map((f) => {
-          const destName = f === "main.mts" ? mainFilename : f;
-          return fs
-            .copyFile(join(templateDir, f), join(destDir, destName))
-            .pipe(Effect.mapError((e) => new Error(e.message)));
-        }),
+        .filter((f) => !shouldSkipTemplateEntry(f))
+        .map((f) =>
+          Effect.gen(function* () {
+            const src = join(templateDir, f);
+            const dirFlag = yield* isDirectory(src);
+            if (dirFlag) {
+              const destSub = join(destDir, f);
+              yield* fs
+                .makeDirectory(destSub, { recursive: true })
+                .pipe(Effect.mapError((e) => new Error(e.message)));
+              yield* copyTemplateFiles(src, destSub, mainFilename, false);
+              return;
+            }
+            const destName = isRoot && f === "main.mts" ? mainFilename : f;
+            yield* fs
+              .copyFile(src, join(destDir, destName))
+              .pipe(Effect.mapError((e) => new Error(e.message)));
+          }),
+        ),
       { concurrency: "unbounded" },
     );
   });
@@ -894,6 +891,61 @@ const copyTemplateFiles = (
  * An omitted `model` leaves factory calls as `pi()` / `claudeCode()` so the
  * agent's CLI default is used.
  */
+const rewriteMainTsContent = (
+  content: string,
+  agent: AgentEntry,
+  model: string | undefined,
+  sandboxProvider: SandboxProviderEntry,
+  sandboxExpression: string,
+  useWorktree: boolean,
+  rewriteFilenameRefs: boolean,
+): string => {
+  let next = content;
+
+  // Templates use main.mts as the canonical filename in comments.
+  // When the target is main.ts, rewrite those references in the root entry.
+  if (rewriteFilenameRefs) {
+    next = next.replace(/main\.mts/g, "main.ts");
+  }
+
+  // Replace factory function name in imports (e.g. claudeCode → pi)
+  // and all factory calls. Templates always use claudeCode as the
+  // placeholder factory, with no model so the CLI default is used.
+  next = next.replace(/\bclaudeCode\b/g, agent.factoryImport);
+  const factoryCallWithModelRe = new RegExp(
+    `${agent.factoryImport}\\(["']([^"']+)["']\\)`,
+    "g",
+  );
+  const factoryCallEmptyRe = new RegExp(`${agent.factoryImport}\\(\\)`, "g");
+  if (model) {
+    next = next.replace(
+      factoryCallWithModelRe,
+      `${agent.factoryImport}("${model}")`,
+    );
+    next = next.replace(
+      factoryCallEmptyRe,
+      `${agent.factoryImport}("${model}")`,
+    );
+  } else {
+    next = next.replace(factoryCallWithModelRe, `${agent.factoryImport}()`);
+  }
+
+  // Replace the sandbox provider. Templates always import docker() as the
+  // placeholder — rewrite the import path and every docker() call site.
+  next = next.replace(
+    /import \{ docker \} from "@yogioo\/sandcastle\/sandboxes\/docker";/,
+    `import { ${sandboxProvider.factoryName} } from "@yogioo/sandcastle/sandboxes/${sandboxProvider.importSubpath}";`,
+  );
+
+  next = next.replace(/\bdocker\(\)/g, sandboxExpression);
+
+  if (!useWorktree) {
+    next = rewriteWorktreeMode(next);
+  }
+
+  return next;
+};
+
 const rewriteMainTs = (
   configDir: string,
   agent: AgentEntry,
@@ -904,54 +956,12 @@ const rewriteMainTs = (
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const mainTsPath = join(configDir, mainFilename);
-
-    const exists = yield* fs
-      .exists(mainTsPath)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
-    if (!exists) return;
-
-    let content = yield* fs
-      .readFileString(mainTsPath)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
-
-    // Templates use main.mts as the canonical filename in comments.
-    // When the target is main.ts, rewrite those references.
-    if (mainFilename === "main.ts") {
-      content = content.replace(/main\.mts/g, "main.ts");
-    }
-
-    // Replace factory function name in imports (e.g. claudeCode → pi)
-    // and all factory calls. Templates always use claudeCode as the
-    // placeholder factory, with no model so the CLI default is used.
-    content = content.replace(/\bclaudeCode\b/g, agent.factoryImport);
-    const factoryCallWithModelRe = new RegExp(
-      `${agent.factoryImport}\\(["']([^"']+)["']\\)`,
-      "g",
-    );
-    const factoryCallEmptyRe = new RegExp(`${agent.factoryImport}\\(\\)`, "g");
-    if (model) {
-      content = content.replace(
-        factoryCallWithModelRe,
-        `${agent.factoryImport}("${model}")`,
-      );
-      content = content.replace(
-        factoryCallEmptyRe,
-        `${agent.factoryImport}("${model}")`,
-      );
-    } else {
-      content = content.replace(
-        factoryCallWithModelRe,
-        `${agent.factoryImport}()`,
-      );
-    }
-
-    // Replace the sandbox provider. Templates always import docker() as the
-    // placeholder — rewrite the import path and every docker() call site.
-    content = content.replace(
-      /import \{ docker \} from "@yogioo\/sandcastle\/sandboxes\/docker";/,
-      `import { ${sandboxProvider.factoryName} } from "@yogioo/sandcastle/sandboxes/${sandboxProvider.importSubpath}";`,
-    );
+    const files = yield* listFilesRecursive(configDir);
+    const mainFiles = files.filter((path) => {
+      const name = basenameOf(path);
+      return name === "main.ts" || name === "main.mts";
+    });
+    if (mainFiles.length === 0) return;
 
     const hasCodingStandards = yield* fs
       .exists(join(configDir, "CODING_STANDARDS.md"))
@@ -960,15 +970,40 @@ const rewriteMainTs = (
       sandboxProvider.containerfileName !== null && hasCodingStandards
         ? `${sandboxProvider.factoryName}({ mounts: [{ hostPath: join(workflowDir, "CODING_STANDARDS.md"), sandboxPath: ".sandcastle/CODING_STANDARDS.md", readonly: true }] })`
         : `${sandboxProvider.factoryName}()`;
-    content = content.replace(/\bdocker\(\)/g, sandboxExpression);
 
-    if (!useWorktree) {
-      content = rewriteWorktreeMode(content);
-    }
+    const rootMainPath = join(configDir, mainFilename);
 
-    yield* fs
-      .writeFileString(mainTsPath, content)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
+    yield* Effect.all(
+      mainFiles.map((mainTsPath) =>
+        Effect.gen(function* () {
+          const exists = yield* fs
+            .exists(mainTsPath)
+            .pipe(Effect.mapError((e) => new Error(e.message)));
+          if (!exists) return;
+
+          const content = yield* fs
+            .readFileString(mainTsPath)
+            .pipe(Effect.mapError((e) => new Error(e.message)));
+
+          const updated = rewriteMainTsContent(
+            content,
+            agent,
+            model,
+            sandboxProvider,
+            sandboxExpression,
+            useWorktree,
+            mainFilename === "main.ts" &&
+              mainTsPath.replace(/\\/g, "/") ===
+                rootMainPath.replace(/\\/g, "/"),
+          );
+
+          yield* fs
+            .writeFileString(mainTsPath, updated)
+            .pipe(Effect.mapError((e) => new Error(e.message)));
+        }),
+      ),
+      { concurrency: "unbounded" },
+    );
   });
 
 /** Switch templates from worktree/merge-to-head mode to direct head writes. */
@@ -1002,16 +1037,16 @@ const rewritePromptFiles = (
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const files = yield* fs
-      .readDirectory(configDir)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
-    const rewriteFiles = files.filter(
-      (f) => f.endsWith(".md") || f.endsWith(".mts") || f.endsWith(".ts"),
-    );
+    const files = yield* listFilesRecursive(configDir);
+    const rewriteFiles = files.filter((filePath) => {
+      const name = basenameOf(filePath);
+      return (
+        name.endsWith(".md") || name.endsWith(".mts") || name.endsWith(".ts")
+      );
+    });
     yield* Effect.all(
-      rewriteFiles.map((f) =>
+      rewriteFiles.map((filePath) =>
         Effect.gen(function* () {
-          const filePath = join(configDir, f);
           const content = yield* fs
             .readFileString(filePath)
             .pipe(Effect.mapError((e) => new Error(e.message)));
@@ -1040,17 +1075,14 @@ const rewriteWorkflowFileReferences = (
     if (sandboxProvider.containerfileName !== null) return;
 
     const fs = yield* FileSystem.FileSystem;
-    const files = yield* fs
-      .readDirectory(configDir)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
+    const files = yield* listFilesRecursive(configDir);
     const displayConfigDir = configDir.replace(/\\/g, "/");
 
     yield* Effect.all(
       files
-        .filter((file) => file.endsWith(".md"))
-        .map((file) =>
+        .filter((filePath) => basenameOf(filePath).endsWith(".md"))
+        .map((filePath) =>
           Effect.gen(function* () {
-            const filePath = join(configDir, file);
             const content = yield* fs
               .readFileString(filePath)
               .pipe(Effect.mapError((e) => new Error(e.message)));
@@ -1102,14 +1134,13 @@ const substituteTemplateArgs = (
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const files = yield* fs
-      .readDirectory(configDir)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
-    const textFiles = files.filter(isTextFile);
+    const files = yield* listFilesRecursive(configDir);
+    const textFiles = files.filter((filePath) =>
+      isTextFile(basenameOf(filePath)),
+    );
     yield* Effect.all(
-      textFiles.map((f) =>
+      textFiles.map((filePath) =>
         Effect.gen(function* () {
-          const filePath = join(configDir, f);
           let content = yield* fs
             .readFileString(filePath)
             .pipe(Effect.mapError((e) => new Error(e.message)));
@@ -1269,26 +1300,13 @@ export const scaffold = (
     const {
       agent,
       model,
-      templateName = "blank",
+      templateName = "standard",
       createLabel = true,
       issueTracker = ISSUE_TRACKER_REGISTRY[0]!, // default: github-issues
       sandboxProvider = SANDBOX_PROVIDER_REGISTRY[0]!, // default: docker
       useWorktree = true,
       stateDir,
     } = options;
-
-    const validationError = validateScaffoldOptions({
-      agent,
-      model,
-      templateName,
-      createLabel,
-      issueTracker,
-      sandboxProvider,
-      useWorktree,
-    });
-    if (validationError) {
-      yield* Effect.fail(new Error(validationError));
-    }
 
     const fs = yield* FileSystem.FileSystem;
     const configDir = stateDir

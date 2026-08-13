@@ -162,7 +162,23 @@ _Avoid_: "create", "bootstrap", "new"
 
 **Config directory**:
 The `.sandcastle/` directory in a **host** repo containing sandbox configuration.
-_Avoid_: ".sandcastle folder", "sandcastle dir"
+_Avoid_: ".sandcastle folder", "sandcastle dir", ".sancastle"
+
+**Workflow template**:
+The self-contained agent orchestration that **init** copies into the **config directory**: the running **host** loop, **prompt template** files, the **workflow guide**, and **workflow recipes**. Distinct from a **prompt template**, which is a single **iteration**'s instruction file. Sandcastle ships two: **standard** (the default sequential implement→review loop) and **blank** (an empty canvas).
+_Avoid_: 裸用「模板」 (collides with **prompt template**), "agent workflow pack", "starter", `sequential-reviewer-head` (old directory name)
+
+**Workflow guide**:
+The agent-facing markdown at `.sandcastle/AGENTS.md`, a sibling of the copied `main.mts`. It explains the running **workflow template** and points at **workflow recipes**. It is not the repository-root `AGENTS.md`.
+_Avoid_: README, "给 Agent 看的文档", `WORKFLOW.md`
+
+**Workflow feature**:
+A capability an agent can add to or remove from **standard** by editing the copied files (for example worktree or planner). Distinct from **init** choices (**agent**, **sandbox provider**, **issue tracker**), which are already written into `main.ts`.
+_Avoid_: "开关", "module" (implies a runtime plugin), "sandbox" as a **workflow feature** (that is the **sandbox provider**)
+
+**Workflow recipe**:
+A folder at `.sandcastle/recipes/<name>/`, referenced by the **workflow guide**, holding reference code and a short README for one documented change to the copied **workflow template**. Most recipes correspond to a **workflow feature** (`worktree`, `planner`). `recipes/sandbox-provider/` is the exception: it shows how to redo the **init** **sandbox provider** choice (docker / podman / no-sandbox), not how to change orchestration.
+_Avoid_: "playbook", "template variant", naming a recipe after an old template (`parallel-planner`)
 
 **Issue tracker**:
 A pluggable source of **tasks** for the **agent**, selected during **init** (e.g. GitHub Issues, Beads). Used loosely -- Beads is a dependency-aware task tracker rather than a literal issue tracker, but "issue tracker" is the umbrella term.

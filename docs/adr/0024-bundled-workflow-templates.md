@@ -8,7 +8,7 @@ Requests recur to ship large, opinionated third-party workflow templates as buil
 
 Sandcastle does not ship large, opinionated third-party workflow templates as built-in `sandcastle init` options.
 
-The built-in templates (`blank`, `simple-loop`, `parallel-planner`, `parallel-planner-with-review`, `sequential-reviewer`) are deliberately minimal, framework-agnostic starting points. They exist to demonstrate the orchestration shapes Sandcastle supports, not to encode any particular external methodology.
+The built-in **workflow templates** are **standard** and **blank**: minimal, framework-agnostic starting points, not an encoding of any particular external methodology. Other orchestration shapes are **workflow recipes** inside **standard**, not extra init menu entries (see ADR 0030). The init-menu-as-shape-catalog stance in earlier revisions of this ADR is superseded by that decision.
 
 A bundled superpowers-style template is a different thing: it ships a large tree of skill markdown, review prompts, and standards that track an external project's conventions. In-tree, that becomes a maintenance burden (the bundled copies drift from upstream) and an implicit endorsement of one workflow over others. It's also big — dozens of files — relative to the focused templates around it.
 

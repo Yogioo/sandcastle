@@ -27,7 +27,6 @@ import {
   addDependencyCommand,
   hostHasDependency,
   getTemplateDependencies,
-  validateScaffoldOptions,
 } from "./InitService.js";
 import { defaultImageName } from "./sandboxes/docker.js";
 import { resolveCliStateDir, resolveInitStateDir } from "./StateDir.js";
@@ -305,9 +304,7 @@ const selectProject = (
 // --- Init command ---
 
 const templateOption = Options.text("template").pipe(
-  Options.withDescription(
-    "Template to scaffold (e.g. blank, simple-loop, parallel-planner)",
-  ),
+  Options.withDescription("Workflow template to scaffold (standard or blank)"),
   Options.optional,
 );
 
@@ -683,7 +680,7 @@ const initCommand = Command.make(
         const selected = yield* Effect.promise(() =>
           clack.select({
             message: "Select a template:",
-            initialValue: "blank",
+            initialValue: "standard",
             options: templates.map((tmpl) => ({
               value: tmpl.name,
               label: tmpl.name,
@@ -699,21 +696,10 @@ const initCommand = Command.make(
         selectedTemplate = selected as string;
       }
 
-      // Git mode is chosen via template (*-head vs default). Keep the internal
-      // default true so existing rewrite/validation paths stay unchanged.
+      // standard and blank are head. Worktree is added after init via the
+      // worktree recipe. Keep the internal default true so existing
+      // rewrite paths stay unchanged.
       const selectedUseWorktree = true;
-
-      const scaffoldValidation = validateScaffoldOptions({
-        agent: selectedAgent,
-        model: selectedModel,
-        templateName: selectedTemplate,
-        issueTracker: selectedIssueTracker,
-        sandboxProvider: selectedSandboxProvider,
-        useWorktree: selectedUseWorktree,
-      });
-      if (scaffoldValidation) {
-        yield* Effect.fail(new InitError({ message: scaffoldValidation }));
-      }
 
       // Offer to create the "Sandcastle" label on the repo (skip for non-GitHub issue trackers).
       // CLI flag > interactive confirm. The flag is only meaningful for the github-issues tracker.
@@ -822,8 +808,8 @@ const initCommand = Command.make(
       // steps below both use the right install command.
       const packageManager = yield* detectPackageManager(cwd);
 
-      // If the chosen template imports zod on the host (planner and
-      // sequential-reviewer templates build structured-output schemas with it)
+      // If the chosen template imports zod on the host (standard builds
+      // structured-output schemas with it)
       // and the host doesn't already declare it, offer to install it. Without
       // this, the very first `npx tsx .sandcastle/main.ts` crashes with
       // ERR_MODULE_NOT_FOUND.
