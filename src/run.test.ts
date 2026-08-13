@@ -577,7 +577,7 @@ describe("buildRunSummaryRows", () => {
     expect(rows["Agent"]).toBe("claude-code");
   });
 
-  it("includes AgentProvider row equal to the provider name", () => {
+  it("includes AgentProvider row with the provider name right after Agent", () => {
     const rows = buildRunSummaryRows({
       name: "Implementer #202",
       agentProvider: "pi",
@@ -586,16 +586,6 @@ describe("buildRunSummaryRows", () => {
       branch: "main",
     });
     expect(rows["AgentProvider"]).toBe("pi");
-  });
-
-  it("places AgentProvider directly after the Agent row", () => {
-    const rows = buildRunSummaryRows({
-      name: "reviewer",
-      agentProvider: "pi",
-      sandboxName: "no-sandbox",
-      maxIterations: 1,
-      branch: "main",
-    });
     expect(Object.keys(rows)).toEqual([
       "Agent",
       "AgentProvider",
@@ -617,7 +607,7 @@ describe("buildRunSummaryRows", () => {
     expect(rows["Branch"]).toBe("sandcastle/issue-160");
   });
 
-  it("does not include a Model row", () => {
+  it("does not include Model or Effect rows", () => {
     const rows = buildRunSummaryRows({
       agentProvider: "claude-code",
       sandboxName: "docker",
