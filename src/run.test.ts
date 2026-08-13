@@ -6,7 +6,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
@@ -17,6 +17,7 @@ import {
   buildStructuredOutputRetryFeedback,
   DEFAULT_MAX_ITERATIONS,
   formatContextWindowSize,
+  displayLogHintPath,
   printFileDisplayStartup,
   run,
   sanitizeBranchForFilename,
@@ -110,28 +111,52 @@ describe("printFileDisplayStartup", () => {
     expect(allOutput).toContain("\u001b[1m");
   });
 
-  it("prints a relative log path when hostRepoDir equals process.cwd()", () => {
+  it("prints a relative log path when the log file is inside process.cwd()", () => {
     const logPath = join(process.cwd(), ".sandcastle", "logs", "main.log");
-    printFileDisplayStartup({
-      logPath,
-      hostRepoDir: process.cwd(),
-    });
+    printFileDisplayStartup({ logPath });
     const allOutput = consoleSpy.mock.calls.flat().join(" ");
-    expect(allOutput).toContain("tail -f .sandcastle/logs/main.log");
+    expect(allOutput).toContain(
+      `tail -f ${join(".sandcastle", "logs", "main.log")}`,
+    );
     expect(allOutput).not.toContain(process.cwd());
   });
 
-  it("prints an absolute log path when hostRepoDir differs from process.cwd()", () => {
-    const hostRepoDir = "/some/other/repo";
-    const logPath = join(hostRepoDir, ".sandcastle", "logs", "main.log");
-    printFileDisplayStartup({
-      logPath,
-      hostRepoDir,
-    });
-    const allOutput = consoleSpy.mock.calls.flat().join(" ");
-    expect(allOutput).toContain(
-      "tail -f /some/other/repo/.sandcastle/logs/main.log",
+  it("prints an absolute log path when the log file is outside process.cwd()", () => {
+    const logPath = join(
+      tmpdir(),
+      "Sandcastle",
+      "projects",
+      "example",
+      ".sandcastle",
+      "logs",
+      "main-implementer.log",
     );
+    printFileDisplayStartup({ logPath });
+    const allOutput = consoleSpy.mock.calls.flat().join(" ");
+    expect(allOutput).toContain(`tail -f ${logPath}`);
+    expect(allOutput).not.toContain(`..${sep}`);
+  });
+});
+
+describe("displayLogHintPath", () => {
+  it("keeps a relative path for logs inside the cwd", () => {
+    const logPath = join(process.cwd(), ".sandcastle", "logs", "main.log");
+    expect(displayLogHintPath(logPath)).toBe(
+      join(".sandcastle", "logs", "main.log"),
+    );
+  });
+
+  it("uses the absolute path for cache-dir logs outside the cwd", () => {
+    const logPath = join(
+      tmpdir(),
+      "Sandcastle",
+      "projects",
+      "example",
+      ".sandcastle",
+      "logs",
+      "main-implementer.log",
+    );
+    expect(displayLogHintPath(logPath)).toBe(logPath);
   });
 });
 

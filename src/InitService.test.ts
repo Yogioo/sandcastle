@@ -88,11 +88,12 @@ describe("InitService scaffold", () => {
     expect(main).toContain(
       'import { noSandbox } from "@yogioo/sandcastle/sandboxes/no-sandbox"',
     );
-    expect(main).toContain('import.meta.resolve("zod"');
+    expect(main).toContain('from "zod"');
+    expect(main).not.toContain("import.meta.resolve");
     expect(main).not.toContain('from "@yogioo/sandcastle/sandboxes/docker"');
   });
 
-  it("resolves zod from the host package when the planner lives outside the repo", async () => {
+  it("keeps a static zod import when the planner lives outside the repo", async () => {
     const repoDir = await makeDir();
     const stateDir = join(repoDir, "cache", ".sandcastle");
 
@@ -102,7 +103,8 @@ describe("InitService scaffold", () => {
     });
 
     const main = await readFile(join(stateDir, "main.mts"), "utf-8");
-    expect(main).toContain('import.meta.resolve("zod"');
+    expect(main).toContain('from "zod"');
+    expect(main).not.toContain("import.meta.resolve");
     expect(main).toContain('from "@yogioo/sandcastle"');
   });
 

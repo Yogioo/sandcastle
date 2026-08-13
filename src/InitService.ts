@@ -896,7 +896,6 @@ const rewriteMainTs = (
   sandboxProvider: SandboxProviderEntry,
   mainFilename: string,
   useWorktree: boolean,
-  externalState: boolean,
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -957,17 +956,6 @@ const rewriteMainTs = (
         ? `${sandboxProvider.factoryName}({ mounts: [{ hostPath: join(workflowDir, "CODING_STANDARDS.md"), sandboxPath: ".sandcastle/CODING_STANDARDS.md", readonly: true }] })`
         : `${sandboxProvider.factoryName}()`;
     content = content.replace(/\bdocker\(\)/g, sandboxExpression);
-
-    if (externalState && content.includes('from "zod"')) {
-      content = content.replace(
-        'import { fileURLToPath } from "node:url";',
-        'import { fileURLToPath, pathToFileURL } from "node:url";',
-      );
-      content = content.replace(
-        'import { z } from "zod";',
-        'const { z } = await import(import.meta.resolve("zod", pathToFileURL(join(process.cwd(), "package.json")).href));',
-      );
-    }
 
     if (!useWorktree) {
       content = rewriteWorktreeMode(content);
@@ -1363,7 +1351,6 @@ export const scaffold = (
       sandboxProvider,
       mainFilename,
       useWorktree,
-      Boolean(stateDir),
     );
 
     // Replace issue tracker template arguments in all text files (must run before label stripping)

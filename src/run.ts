@@ -99,12 +99,28 @@ export interface FileDisplayStartupOptions {
   readonly logPath: string;
   readonly agentName?: string;
   readonly branch?: string;
-  /** Resolved host repo directory. When it differs from `process.cwd()`, the
-   *  log-file hint is printed as an absolute path so it can be pasted into any
-   *  terminal. When it equals `process.cwd()` (or is omitted), a relative path
-   *  is printed instead. */
-  readonly hostRepoDir?: string;
 }
+
+/**
+ * Path shown in the `tail -f` startup hint. Relative when the log lives
+ * inside `cwd` (clickable in the repo); absolute otherwise so cache-dir
+ * logs are pasteable and clickable instead of `..\..\Users\...`.
+ */
+export const displayLogHintPath = (
+  logPath: string,
+  cwd: string = process.cwd(),
+): string => {
+  const relativePath = path.relative(cwd, logPath);
+  if (
+    relativePath === "" ||
+    relativePath === ".." ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath)
+  ) {
+    return logPath;
+  }
+  return relativePath;
+};
 
 /**
  * Print the startup message to the terminal when using file-based logging.
@@ -116,11 +132,7 @@ export const printFileDisplayStartup = (
   const name = options.agentName ?? "Agent";
   const label = styleText("bold", `[${name}]`);
   const branchPart = options.branch ? ` on branch ${options.branch}` : "";
-  const hostRepoDir = options.hostRepoDir ?? process.cwd();
-  const displayLogPath =
-    hostRepoDir === process.cwd()
-      ? path.relative(process.cwd(), options.logPath)
-      : options.logPath;
+  const displayLogPath = displayLogHintPath(options.logPath);
   console.log(`${label} Started${branchPart}`);
   console.log(styleText("dim", `  tail -f ${displayLogPath}`));
 };
@@ -669,7 +681,6 @@ export async function run(
             logPath: resolvedLogging.path,
             agentName: options.name,
             branch: resolvedBranch,
-            hostRepoDir,
           });
           return Layer.provide(
             FileDisplay.layer(resolvedLogging.path),

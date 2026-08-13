@@ -3,6 +3,8 @@ import {
   type ChildProcess,
   type SpawnOptions,
 } from "node:child_process";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 
 export type ProjectSpawn = (
   command: string,
@@ -11,13 +13,23 @@ export type ProjectSpawn = (
 ) => ChildProcess;
 
 /**
- * Node customization-hook entry that remaps `@yogioo/sandcastle` to this CLI
- * installation. Generated runners live in the per-user cache, so default ESM
- * resolution would look next to the entry file instead of the CLI package.
+ * Node customization-hook entry that remaps `@yogioo/sandcastle` (and host
+ * packages such as `zod`) for generated runners in the per-user cache.
  */
 export const sandcastleRegisterUrl = (): string =>
   new URL("./register-sandcastle.js", import.meta.url).href;
 
+export const tsxCliPath = (): string => {
+  const require = createRequire(import.meta.url);
+  return join(dirname(require.resolve("tsx/package.json")), "dist", "cli.mjs");
+};
+
+/**
+ * Attach the resolve hook via NODE_OPTIONS. tsx re-execs itself and drops
+ * argv `--import` flags, so the hook must live in the environment to apply
+ * to the runner. Agent CLIs inherit this too; the hook tries default
+ * resolution first so their own packages are not stolen.
+ */
 export const withSandcastleResolveHook = (
   env: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv => {
@@ -35,9 +47,9 @@ export const withSandcastleResolveHook = (
 /**
  * Execute a generated project entry file through the package's CLI runtime.
  *
- * The entry is intentionally launched as a child process: generated workflow
- * files remain user-editable, while the Sandcastle CLI owns repository cwd,
- * stdio forwarding, and the final exit code.
+ * Spawn `node <tsx> <entry>` directly. `npx.cmd tsx` on Windows can exit 1
+ * with no output when a customization hook is registered, so the CLI package
+ * depends on `tsx` and invokes it without npx.
  */
 export const spawnProjectRunner = (
   entryFile: string,
@@ -46,12 +58,7 @@ export const spawnProjectRunner = (
 ): Promise<number> =>
   new Promise((resolve, reject) => {
     let settled = false;
-    const isWindows = process.platform === "win32";
-    const command = isWindows ? process.env.ComSpec || "cmd.exe" : "npx";
-    const args = isWindows
-      ? ["/d", "/c", "npx.cmd", "tsx", entryFile]
-      : ["tsx", entryFile];
-    const child = spawnProcess(command, args, {
+    const child = spawnProcess(process.execPath, [tsxCliPath(), entryFile], {
       cwd: repoDir,
       stdio: "inherit",
       env: withSandcastleResolveHook(),

@@ -3,11 +3,12 @@ import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import {
   spawnProjectRunner,
+  tsxCliPath,
   withSandcastleResolveHook,
 } from "./ProjectRunner.js";
 
 describe("ProjectRunner", () => {
-  it("spawns the generated entry with the repository cwd and forwards its exit code", async () => {
+  it("spawns node tsx with the repository cwd and forwards its exit code", async () => {
     let received:
       | {
           command: string;
@@ -44,20 +45,11 @@ describe("ProjectRunner", () => {
       ),
     ).resolves.toBe(23);
 
-    expect(received?.command).toBe(
-      process.platform === "win32" ? process.env.ComSpec || "cmd.exe" : "npx",
-    );
-    expect(received?.args).toEqual(
-      process.platform === "win32"
-        ? [
-            "/d",
-            "/c",
-            "npx.cmd",
-            "tsx",
-            "C:/cache/project/.sandcastle/main.mts",
-          ]
-        : ["tsx", "C:/cache/project/.sandcastle/main.mts"],
-    );
+    expect(received?.command).toBe(process.execPath);
+    expect(received?.args).toEqual([
+      tsxCliPath(),
+      "C:/cache/project/.sandcastle/main.mts",
+    ]);
     expect(received?.cwd).toBe("C:/projects/example");
     expect(received?.stdio).toBe("inherit");
     expect(received?.nodeOptions).toContain("--import=");
