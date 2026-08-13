@@ -1,5 +1,12 @@
 # @yogioo/sandcastle
 
+## 0.14.1
+
+### Patch Changes
+
+- a20f3c2: Register a module resolve hook when `sandcastle` launches a generated runner so `@yogioo/sandcastle` is loaded from the CLI installation instead of the target repository.
+- a20f3c2: Prompt during `sandcastle init` to create a git repository with an initial commit when the target has none, and abort init if the user declines.
+
 ## 0.14.0
 
 ### Minor Changes
