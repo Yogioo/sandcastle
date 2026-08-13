@@ -1,5 +1,11 @@
 # @yogioo/sandcastle
 
+## 0.14.0
+
+### Minor Changes
+
+- 28cee88: Add `simple-loop-head` and `sequential-reviewer-head` templates, and choose git mode via template instead of an init worktree prompt.
+
 ## 0.13.0
 
 ### Minor Changes
