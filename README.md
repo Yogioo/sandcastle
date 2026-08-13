@@ -93,20 +93,25 @@ npm link
 ```powershell
 cd C:\projects\your-project
 npm link @yogioo/sandcastle
-New-Item -ItemType Directory -Force .sandcastle
+New-Item -ItemType Directory -Force C:\tools\unity-agent\your-project
 @"
 OPENAI_API_KEY=
-"@ | Set-Content .sandcastle\.env
+"@ | Set-Content C:\tools\unity-agent\your-project\.env
 ```
 
-若不使用 `codex login`，请在 `.sandcastle/.env` 中设置 `OPENAI_API_KEY`。
-创建 `.sandcastle/local-task.ts`，写入项目特定任务：
+若不使用 `codex login`，请在 `C:\tools\unity-agent\your-project\.env` 中设置
+`OPENAI_API_KEY`。在 `C:\tools\unity-agent\your-project\local-task.ts` 创建项目特定任务：
 
 ```typescript
 import { codex, createWorktree } from "@yogioo/sandcastle";
 import { noSandbox } from "@yogioo/sandcastle/sandboxes/no-sandbox";
 
+const repoDir = "C:/projects/your-project";
+const stateDir = "C:/tools/unity-agent/your-project";
+
 await using worktree = await createWorktree({
+  cwd: repoDir,
+  stateDir,
   branchStrategy: { type: "branch", branch: "agent/local-task" },
 });
 
@@ -119,10 +124,11 @@ const result = await worktree.run({
 console.log(result.commits);
 ```
 
-从目标仓库根目录运行，Sandcastle 会把 `.env`、日志、worktree 和 patches 放入 `stateDir`，而 Git 操作仍针对 `cwd`：
+从任意目录运行，Sandcastle 会把 `.env`、日志、worktree 和 patches 放入
+`stateDir`，而 Git 操作仍针对 `cwd`：
 
 ```powershell
-npx tsx --env-file=C:/tools/unity-agent/MyUnityGame/.env C:/tools/unity-agent/MyUnityGame/main.mts
+npx tsx --env-file="C:\tools\unity-agent\your-project\.env" "C:\tools\unity-agent\your-project\local-task.ts"
 ```
 
 `noSandbox()` 表示代理直接在宿主机上执行命令。Git worktree 隔离的是分支与工作目录，不隔离宿主机凭据、网络访问或已安装工具。请使用专用分支，合并前审查提交。
@@ -299,10 +305,10 @@ const result = await run({
     mergeToHostMs: 60_000, // 默认：30_000
   },
 
-  // 如何记录进度。默认：写入 .sandcastle/logs/ 下的文件
+  // 如何记录进度。默认：写入用户缓存 stateDir/logs/ 下的文件
   logging: {
     type: "file",
-    path: ".sandcastle/logs/my-run.log",
+    path: "../unity-agent-state/logs/my-run.log",
     // 可选：将代理输出流转发到自有可观测系统。
     // 每个文本块、工具调用及原始 stdout 行都会触发。
     // 回调抛错会被吞掉，避免转发器故障导致运行失败。
@@ -928,7 +934,7 @@ worktree 只在交互界面中选择，不增加命令行参数。stdin 非 TTY 
 | -------------------------- | ------------------ | ----------------------------- | ------------------------------------------------------------------------------------ |
 | `agent`                    | AgentProvider      | —                             | **必填。** 代理提供商（如 `claudeCode(...)`、`codex(...)`、`cursor(...)` 等）        |
 | `sandbox`                  | SandboxProvider    | —                             | **必填。** 沙箱提供商                                                                |
-| `cwd`                      | string             | `process.cwd()`               | 宿主机仓库目录——`.sandcastle/` 产物与 git 操作的锚点                                 |
+| `cwd`                      | string             | `process.cwd()`               | 宿主机仓库目录——Git 操作的锚点；Sandcastle 状态由 `stateDir` 管理                   |
 | `stateDir`                 | string             | 用户缓存目录                  | Sandcastle 状态根：`.env`、日志、worktree 与 patches                                 |
 | `prompt`                   | string             | —                             | 内联提示词（与 `promptFile` 互斥）                                                   |
 | `promptFile`               | string             | —                             | 提示词文件路径。相对 `process.cwd()`，**非** `cwd`                                   |
