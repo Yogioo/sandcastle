@@ -38,19 +38,9 @@ await run({
   // the host directory directly (no worktree to copy into).
   branchStrategy: { type: "merge-to-head" },
 
-  // Copy node_modules from the host into the worktree before the sandbox
-  // starts. This avoids a full npm install from scratch on every iteration.
-  // The onSandboxReady hook still runs npm install as a safety net to handle
-  // platform-specific binaries and any packages added since the last copy.
+  // Copy node_modules from the host into the worktree when it exists.
+  // Missing paths are skipped, so this is a no-op for non-Node projects.
+  // Add a sandbox.onSandboxReady install command if you need a
+  // package-manager install after the sandbox is ready — there is no default.
   copyToWorktree: ["node_modules"],
-
-  // Lifecycle hooks — commands grouped by where they run (host or sandbox).
-  hooks: {
-    sandbox: {
-      // onSandboxReady runs once after the sandbox is initialised and the repo is
-      // synced in, before the agent starts. Use it to install dependencies or run
-      // any other setup steps your project needs.
-      onSandboxReady: [{ command: "npm install" }],
-    },
-  },
 });

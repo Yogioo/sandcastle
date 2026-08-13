@@ -38,13 +38,6 @@ await run({
   // do not want a temporary worktree.
   branchStrategy: { type: "head" },
 
-  // Lifecycle hooks — commands grouped by where they run (host or sandbox).
-  hooks: {
-    sandbox: {
-      // onSandboxReady runs once after the sandbox is initialised and the repo is
-      // synced in, before the agent starts. Use it to install dependencies or run
-      // any other setup steps your project needs.
-      onSandboxReady: [{ command: "npm install" }],
-    },
-  },
+  // Add a sandbox.onSandboxReady install command if you need a
+  // package-manager install after the sandbox is ready — there is no default.
 });

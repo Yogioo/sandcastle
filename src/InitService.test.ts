@@ -480,8 +480,20 @@ describe("InitService scaffold", () => {
     // When scaffolded with default model, simple-loop uses claude-opus-4-8
     // (rewritten from template's claude-sonnet-4-6)
     expect(mainTs).toContain("promptFile");
-    expect(mainTs).toContain("npm install");
-    expect(mainTs).toContain("onSandboxReady");
+    expect(mainTs).toContain("copyToWorktree");
+    expect(mainTs).not.toContain('command: "npm install"');
+  });
+
+  it("no bundled template runs npm install as an onSandboxReady hook", async () => {
+    for (const template of listTemplates()) {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: template.name });
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs, template.name).not.toContain('command: "npm install"');
+    }
   });
 
   it("simple-loop prompt.md contains shell expressions for issues and commit history", async () => {
@@ -856,11 +868,11 @@ describe("InitService scaffold", () => {
       expect(joined).toContain("npm run sandcastle");
     });
 
-    it("non-blank template includes a note about customizing the install command", () => {
+    it("non-blank template includes a note about adding an onSandboxReady install command", () => {
       const lines = next("simple-loop", "main.mts");
       const joined = lines.join("\n");
-      expect(joined).toContain("npm install");
       expect(joined).toContain("onSandboxReady");
+      expect(joined).toContain("install command");
     });
 
     it("non-blank template mentions copyToWorktree and node_modules", () => {
@@ -1243,7 +1255,7 @@ describe("InitService scaffold", () => {
       ).resolves.toBeUndefined();
     });
 
-    it("main.mts uses npm install hook and imports sandcastle", async () => {
+    it("main.mts imports sandcastle and does not default to npm install", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner" });
 
@@ -1251,7 +1263,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain("npm install");
+      expect(mainTs).not.toContain('command: "npm install"');
       expect(mainTs).toContain("sandcastle");
     });
 

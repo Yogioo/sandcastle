@@ -781,7 +781,7 @@ export function getNextStepsLines(
       );
     } else {
       lines.push(
-        `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. Adjust both if you use a different package manager`,
+        `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup (missing paths are skipped). Add a \`sandbox.onSandboxReady\` install command if your project needs a package-manager install after the sandbox starts`,
       );
     }
     if (usesPlanSchema) {

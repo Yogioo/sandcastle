@@ -35,11 +35,8 @@ const workflowDir = fileURLToPath(new URL(".", import.meta.url));
 // Each cycle works on one issue. Raise this to process more issues per run.
 const MAX_ITERATIONS = 10;
 
-// Hooks run inside the sandbox before the agent starts each iteration.
-// npm install ensures the sandbox always has fresh dependencies.
-const hooks = {
-  sandbox: { onSandboxReady: [{ command: "npm install" }] },
-};
+// Add a sandbox.onSandboxReady install command if you need a
+// package-manager install after the sandbox is ready — there is no default.
 
 // ---------------------------------------------------------------------------
 // Main loop
@@ -75,7 +72,6 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     sandbox: docker(),
     promptFile: join(workflowDir, "implement-prompt.md"),
     branchStrategy: { type: "head" },
-    hooks,
   });
 
   if (!implement.commits.length) {
@@ -109,7 +105,6 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       BASE_SHA: baseSha,
     },
     branchStrategy: { type: "head" },
-    hooks,
   });
 
   console.log("\nReview complete.");

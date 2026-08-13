@@ -46,15 +46,10 @@ const planSchema = z.object({
 // Raise this if your backlog is large; lower it for a quick smoke-test run.
 const MAX_ITERATIONS = 10;
 
-// Hooks run inside the sandbox before the agent starts each iteration.
-// npm install ensures the sandbox always has fresh dependencies.
-const hooks = {
-  sandbox: { onSandboxReady: [{ command: "npm install" }] },
-};
-
-// Copy node_modules from the host into the worktree before each sandbox
-// starts. Avoids a full npm install from scratch; the hook above handles
-// platform-specific binaries and any packages added since the last copy.
+// Copy node_modules from the host into the worktree when it exists.
+// Missing paths are skipped, so this is a no-op for non-Node projects.
+// Add a sandbox.onSandboxReady install command if you need a
+// package-manager install after the sandbox is ready — there is no default.
 const copyToWorktree = ["node_modules"];
 
 // ---------------------------------------------------------------------------
@@ -76,7 +71,6 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   const plan = await sandcastle.run({
     cwd: repoDir,
     stateDir: workflowDir,
-    hooks,
     sandbox: docker(),
     name: "planner",
     // One iteration is enough: the planner just needs to read and reason,
@@ -123,7 +117,6 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         cwd: repoDir,
         stateDir: workflowDir,
         sandbox: docker(),
-        hooks,
         copyToWorktree,
       });
 
@@ -215,7 +208,6 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   await sandcastle.run({
     cwd: repoDir,
     stateDir: workflowDir,
-    hooks,
     sandbox: docker(),
     name: "merger",
     maxIterations: 1,
