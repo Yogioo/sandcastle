@@ -19,7 +19,7 @@ You are the **spec** phase of the Sandcastle planning workflow. A discussion tas
    - acceptance criteria a tester can check,
    - explicit non-goals (what the implement workflow must **not** build),
    - open questions — there should be none; if a blocker ambiguity survives, stop and do not post.
-4. Post the spec as **one comment** on the parent issue:
+4. Post the spec as **one comment** on the discussion task:
    - Write the comment body to a file, then publish it with `{{COMMENT_ON_TASK_COMMAND}}`.
    - The comment must start with this exact marker on its own line: `[Sandcastle]`.
 5. Apply the specced label: `{{ADD_LABEL_COMMAND}}` with `<LABEL>` = `specced`. Keep the `aligned` label.

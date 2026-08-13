@@ -17,7 +17,7 @@ You are the **tickets** phase of the Sandcastle planning workflow. A discussion 
 3. Split the spec into child tasks. Each child must be:
    - independently implementable — small enough for one implement iteration,
    - verifiable — it states how a tester confirms it is done,
-   - linked back to this parent issue in its body.
+   - linked back to this discussion task in its body.
 4. Create each child task with `{{CREATE_TASK_COMMAND}}`. Children are **ready tasks**: they must carry the `Sandcastle` label so the implement workflow's list picks them up. Write each child body to a file before creating.
 5. Apply the planned label to the parent: `{{ADD_LABEL_COMMAND}}` with `<LABEL>` = `planned`. Keep `aligned` and `specced`.
 6. Post a summary comment on the parent listing every child task you created, with links:
@@ -26,7 +26,7 @@ You are the **tickets** phase of the Sandcastle planning workflow. A discussion 
 
 ## Rules
 
-- The parent issue stays **open** — it is the epic for its children. Do not close it.
+- The discussion task stays **open** — it is the epic for its children. Do not close it.
 - Do not create children for work already covered by an existing issue; link the existing issue instead.
 - If the spec is too vague to decompose, do not create anything. Post a comment asking the human to reopen the grill, and stop.
 - Do not use skill commands (`/to-tickets` or similar). This prompt is the full behavior spec; follow it directly.
