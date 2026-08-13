@@ -15,8 +15,8 @@ repository-local `.sandcastle/`.
 - `main.ts` / `main.mts` -- The workflow entry point
 - `Dockerfile` -- Defines the sandbox environment
 - `prompt.md` -- The prompt sent to the agent each iteration
-- `.env` / `.env.example` -- Environment variables for the sandbox; `init`
-  creates `.env` automatically from the example
+- `.env` -- Environment variables for the sandbox; `init` creates it with
+  required keys commented out so you can fill them in
 - `logs/`, `worktrees/`, and `patches/` -- Runtime artifacts
 
 ## Prompt
@@ -29,4 +29,6 @@ The `prompt.md` file is the instruction text passed to the agent at the start of
 ## Environment Variables
 
 Sandcastle reads the state directory's `.env` file and falls back to
-`process.env` only for keys declared in that file.
+`process.env` only for keys declared in that file. Commented lines are ignored,
+so uncomment a key (even with an empty value) to opt into the process.env
+fallback.

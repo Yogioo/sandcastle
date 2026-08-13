@@ -24,7 +24,7 @@ Before implementing, confirm the issue tracker satisfies the must-haves below. I
 ### Must-have CLI capabilities
 
 - **Official / first-party CLI.** We will not ship a third-party CLI as the default integration. Reason: the scaffold prints these commands directly into user prompts and installs the CLI into every generated **sandbox** — recommending an unofficial tool puts users on a maintenance path we don't control.
-- **Non-interactive auth via env var.** The CLI must authenticate from an environment variable (typically a personal access token) without an interactive login. The token name goes into `.env.example`.
+- **Non-interactive auth via env var.** The CLI must authenticate from an environment variable (typically a personal access token) without an interactive login. The token name goes into the generated `.env` (commented out).
 - **Non-interactive list command.** A single command that prints open tasks, ideally filterable by some "ready" signal (label, status, query). This becomes `LIST_TASKS_COMMAND`.
 - **Non-interactive view command.** A command that prints a single task by ID, including its description and (ideally) comments. This becomes `VIEW_TASK_COMMAND`.
 - **Non-interactive close command.** A command that closes a task by ID, ideally accepting a closing comment. This becomes `CLOSE_TASK_COMMAND`.
@@ -46,7 +46,7 @@ Before implementing, confirm the issue tracker satisfies the must-haves below. I
 For `sandcastle init` to offer the issue tracker:
 
 - A Dockerfile snippet that installs the CLI as root (before any `USER` switch in the agent provider's Dockerfile).
-- A token env var to surface in `.env.example`, or an empty string if no auth is required (Beads is the local-only example).
+- A token env var to surface in `.env` (commented out), or an empty string if no auth is required (Beads is the local-only example).
 - Concrete `LIST_TASKS_COMMAND`, `VIEW_TASK_COMMAND`, `CLOSE_TASK_COMMAND` strings. Use `<ID>` as the placeholder for a task ID in the view/close commands — the generated prompts substitute it.
 
 ## The `IssueTrackerEntry` shape
@@ -75,7 +75,7 @@ Field by field:
 - `templateArgs.VIEW_TASK_COMMAND` — shell command that prints one task by ID. Use `<ID>` as the literal placeholder.
 - `templateArgs.CLOSE_TASK_COMMAND` — shell command that closes a task by ID. Use `<ID>` as the literal placeholder.
 - `templateArgs.ISSUE_TRACKER_TOOLS` — Dockerfile snippet that installs the CLI. Substituted into the agent provider's Dockerfile at the `{{ISSUE_TRACKER_TOOLS}}` placeholder, which sits before the `USER agent` line, so commands run as root.
-- `envExample` — lines appended to `.env.example`. Empty string if no auth is required.
+- `envExample` — lines appended to `.env`. Empty string if no auth is required. Assignment lines are commented out in the generated file.
 
 ## Scaffold integration
 
@@ -92,7 +92,7 @@ Add an entry to `ISSUE_TRACKER_REGISTRY` in [`src/InitService.ts`](../../src/Ini
     ISSUE_TRACKER_TOOLS: GLAB_TOOLS,
   },
   envExample: `# GitLab personal access token
-GITLAB_TOKEN=`,
+# GITLAB_TOKEN=`,
 }
 ```
 
@@ -104,6 +104,6 @@ For a new issue tracker `foo`:
 
 - [ ] `ISSUE_TRACKER_REGISTRY` entry in [`src/InitService.ts`](../../src/InitService.ts).
 - [ ] `FOO_TOOLS` Dockerfile-snippet constant in `src/InitService.ts`.
-- [ ] Tests in `src/InitService.test.ts` covering: entry is listed by `listIssueTrackers`, `getIssueTracker("foo")` returns the entry with the expected `templateArgs`, `.env.example` includes the token line, generated prompts contain the substituted commands.
+- [ ] Tests in `src/InitService.test.ts` covering: entry is listed by `listIssueTrackers`, `getIssueTracker("foo")` returns the entry with the expected `templateArgs`, `.env` includes the token line (commented out), generated prompts contain the substituted commands.
 - [ ] Changeset in `.changeset/` (patch, since pre-1.0). See [`CLAUDE.md`](../../CLAUDE.md).
 - [ ] `README.md` update if the public-facing list of supported issue trackers is mentioned there.
