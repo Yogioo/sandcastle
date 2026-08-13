@@ -188,6 +188,10 @@ _Avoid_: "the loop" (there are two), "RALPH loop", "execution loop"
 The grill→spec→tickets loop on **discussion tasks**. Started by `sandcastle plan` / `sandcastle plan .`. A sibling process to the **implement workflow**, not a **workflow feature** and not the **planner** recipe.
 _Avoid_: "planner" (that recipe is plan→parallel execute→merge for implementation), "intake", "to-tickets loop"
 
+**Agent comment marker**:
+The fixed `[Sandcastle]` prefix on every agent comment the **planning workflow** posts on a **discussion task**. The host probe tells agent comments from human replies by this marker alone — no tracker author identity is required.
+_Avoid_: "AI disclaimer", "bot prefix"
+
 **Workflow guide**:
 The agent-facing markdown at `.sandcastle/AGENTS.md`, a sibling of the copied `main.mts`. It explains the running **workflow template** and points at **workflow recipes**. It is not the repository-root `AGENTS.md`.
 _Avoid_: README, "给 Agent 看的文档", `WORKFLOW.md`
