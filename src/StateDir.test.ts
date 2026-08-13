@@ -8,6 +8,7 @@ import {
   resolveRuntimeStateDir,
   STATE_DIR_NAME,
 } from "./StateDir.js";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 describe("StateDir", () => {
@@ -67,11 +68,9 @@ describe("StateDir", () => {
 
   it("uses the external cache for init and runtime", () => {
     const repoDir = "C:/projects/example";
-    const explicit = "C:/tools/sandcastle/example";
+    const explicit = join(tmpdir(), "sandcastle-explicit");
 
-    expect(resolveInitStateDir(repoDir, explicit)).toBe(
-      join("C:/tools/sandcastle/example"),
-    );
+    expect(resolveInitStateDir(repoDir, explicit)).toBe(explicit);
     expect(resolveRuntimeStateDir(repoDir)).toBe(defaultStateDir(repoDir));
   });
 

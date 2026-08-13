@@ -52,11 +52,14 @@ const initRepoWithCommit = async (dir: string) => {
   await commitFile(dir, "initial.txt", "initial", "initial commit");
 };
 
+/** Keep sandbox factory tests inside the temp repo instead of the user cache. */
+const repoStateDir = (hostDir: string): string => join(hostDir, ".sandcastle");
+
 /** Find the sole worktree directory created under hostDir/.sandcastle/worktrees. */
 const findCreatedWorktree = async (
   hostDir: string,
 ): Promise<string | undefined> => {
-  const worktreesDir = join(hostDir, ".sandcastle", "worktrees");
+  const worktreesDir = join(repoStateDir(hostDir), "worktrees");
   if (!existsSync(worktreesDir)) return undefined;
   const entries = await readdir(worktreesDir);
   if (entries.length === 0) return undefined;
@@ -106,6 +109,7 @@ describe("WorktreeDockerSandboxFactory", () => {
         Layer.succeed(SandboxConfig, {
           env: { FOO: "bar" },
           hostRepoDir,
+          stateDir: repoStateDir(hostRepoDir),
           sandboxProvider: mockProvider.provider,
           branchStrategy,
         }),
@@ -184,6 +188,7 @@ describe("WorktreeDockerSandboxFactory", () => {
         Layer.succeed(SandboxConfig, {
           env: { FOO: "bar" },
           hostRepoDir,
+          stateDir: repoStateDir(hostRepoDir),
           sandboxProvider: provider,
           branchStrategy: { type: "merge-to-head" },
         }),
@@ -351,6 +356,7 @@ describe("WorktreeDockerSandboxFactory", () => {
         Layer.succeed(SandboxConfig, {
           env: {},
           hostRepoDir,
+          stateDir: repoStateDir(hostRepoDir),
           copyToWorktree: ["some-file.txt"],
           sandboxProvider: mockProvider.provider,
           branchStrategy: { type: "merge-to-head" },
@@ -472,6 +478,7 @@ describe("WorktreeDockerSandboxFactory", () => {
         Layer.succeed(SandboxConfig, {
           env: { FOO: "bar" },
           hostRepoDir,
+          stateDir: repoStateDir(hostRepoDir),
           sandboxProvider: failingProvider,
           branchStrategy: { type: "merge-to-head" },
         }),
@@ -626,6 +633,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
         Layer.succeed(SandboxConfig, {
           env: {},
           hostRepoDir,
+          stateDir: repoStateDir(hostRepoDir),
           copyToWorktree,
           sandboxProvider: testIsolated(),
           branchStrategy: { type: "merge-to-head" },
@@ -793,6 +801,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
         Layer.succeed(SandboxConfig, {
           env: {},
           hostRepoDir: hostDir,
+          stateDir: repoStateDir(hostDir),
           sandboxProvider: testIsolated(),
           branchStrategy: { type: "branch", branch: "feature/my-branch" },
         }),
@@ -902,6 +911,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
         Layer.succeed(SandboxConfig, {
           env: {},
           hostRepoDir: hostDir,
+          stateDir: repoStateDir(hostDir),
           sandboxProvider: failingProvider,
           branchStrategy: { type: "merge-to-head" },
         }),
@@ -976,6 +986,7 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
         Layer.succeed(SandboxConfig, {
           env: {},
           hostRepoDir,
+          stateDir: repoStateDir(hostRepoDir),
           sandboxProvider: noSandbox(),
           branchStrategy,
         }),
@@ -1064,6 +1075,7 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
         Layer.succeed(SandboxConfig, {
           env: {},
           hostRepoDir: hostDir,
+          stateDir: repoStateDir(hostDir),
           sandboxProvider: failingProvider,
           branchStrategy: { type: "merge-to-head" },
         }),
