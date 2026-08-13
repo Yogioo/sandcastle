@@ -1,5 +1,11 @@
 # @yogioo/sandcastle
 
+## 0.14.2
+
+### Patch Changes
+
+- 6c4c9df: Stop scaffolding a default `npm install` onSandboxReady hook. Templates no longer assume a Node project; add an install command only if the repo needs one.
+
 ## 0.14.1
 
 ### Patch Changes
