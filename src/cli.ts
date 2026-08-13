@@ -18,6 +18,7 @@ import {
   listTemplates,
   listAgents,
   getAgent,
+  agentSelectOptions,
   listIssueTrackers,
   getIssueTracker,
   listSandboxProviders,
@@ -592,11 +593,7 @@ const initCommand = Command.make(
           clack.select({
             message: "Select an agent:",
             initialValue: "claude-code",
-            options: agents.map((a) => ({
-              value: a.name,
-              label: a.label,
-              hint: `Default model: ${a.defaultModel}`,
-            })),
+            options: agentSelectOptions(agents),
           }),
         );
         if (clack.isCancel(selected)) {

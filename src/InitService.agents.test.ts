@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listAgents, getAgent } from "./InitService.js";
+import { listAgents, getAgent, agentSelectOptions } from "./InitService.js";
 
 describe("Agent registry", () => {
   it("listAgents returns at least claude-code", () => {
@@ -80,6 +80,19 @@ describe("Agent registry", () => {
     expect(agent!.factoryImport).toBe("opencode");
     expect(agent!.dockerfileTemplate).toContain("FROM");
     expect(agent!.dockerfileTemplate).toContain("opencode-ai");
+  });
+
+  it("agentSelectOptions returns value/label pairs with no default-model hint", () => {
+    const options = agentSelectOptions(listAgents());
+    expect(options.length).toBe(listAgents().length);
+    for (const option of options) {
+      // The model is optional now (omitted -> agent CLI's own default),
+      // so no "Default model: ..." hint may be shown.
+      expect(option).not.toHaveProperty("hint");
+      const entry = getAgent(option.value);
+      expect(entry).toBeDefined();
+      expect(option.label).toBe(entry!.label);
+    }
   });
 
   it("listAgents includes copilot", () => {

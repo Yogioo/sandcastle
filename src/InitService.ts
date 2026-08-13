@@ -474,6 +474,16 @@ const AGENT_REGISTRY: AgentEntry[] = [
 
 export const listAgents = (): AgentEntry[] => AGENT_REGISTRY;
 
+/**
+ * Options for the interactive agent picker's `clack.select`. Deliberately
+ * no `hint`: the model is optional (omitted -> the agent CLI's own default),
+ * so a "Default model: ..." hint would be misleading.
+ */
+export const agentSelectOptions = (
+  agents: AgentEntry[],
+): { value: string; label: string }[] =>
+  agents.map((a) => ({ value: a.name, label: a.label }));
+
 // ---------------------------------------------------------------------------
 // Issue tracker registry (internal — not part of public API)
 // ---------------------------------------------------------------------------
