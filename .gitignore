@@ -9,3 +9,6 @@ dist
 *.db
 .beads-credential-key
 .beads
+
+# Beads / Dolt files (added by bd init)
+.beads/proxieddb/

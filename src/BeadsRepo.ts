@@ -31,6 +31,8 @@ export const inspectBeadsDb = (repoDir: string): BeadsDbStatus =>
 /**
  * Initialize a beads database in `repoDir`.
  * Skips AGENTS.md / git-hook setup so sandcastle init only creates the database.
+ * `--remote=` (empty) prevents bd from auto-linking the git origin as a Dolt
+ * remote, which would otherwise hang on non-beads GitHub remotes.
  */
 export const initializeBeadsDb = (repoDir: string): void => {
   bd(repoDir, [
@@ -40,5 +42,6 @@ export const initializeBeadsDb = (repoDir: string): void => {
     "--skip-agents",
     "--skip-hooks",
     "--init-if-missing",
+    "--remote=",
   ]);
 };
