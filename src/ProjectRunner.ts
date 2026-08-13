@@ -11,6 +11,28 @@ export type ProjectSpawn = (
 ) => ChildProcess;
 
 /**
+ * Node customization-hook entry that remaps `@yogioo/sandcastle` to this CLI
+ * installation. Generated runners live in the per-user cache, so default ESM
+ * resolution would look next to the entry file instead of the CLI package.
+ */
+export const sandcastleRegisterUrl = (): string =>
+  new URL("./register-sandcastle.js", import.meta.url).href;
+
+export const withSandcastleResolveHook = (
+  env: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv => {
+  const flag = `--import=${sandcastleRegisterUrl()}`;
+  const existing = env.NODE_OPTIONS?.trim();
+  if (existing?.includes(flag)) {
+    return { ...env };
+  }
+  return {
+    ...env,
+    NODE_OPTIONS: existing ? `${existing} ${flag}` : flag,
+  };
+};
+
+/**
  * Execute a generated project entry file through the package's CLI runtime.
  *
  * The entry is intentionally launched as a child process: generated workflow
@@ -32,6 +54,7 @@ export const spawnProjectRunner = (
     const child = spawnProcess(command, args, {
       cwd: repoDir,
       stdio: "inherit",
+      env: withSandcastleResolveHook(),
     });
 
     child.once("error", (error) => {

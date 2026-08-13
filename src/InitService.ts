@@ -696,7 +696,9 @@ export function getNextStepsLines(
 
     const mainCommand = `npx tsx ${displayStateDir}/${mainFilename}`;
     const quotedMainCommand = `npx tsx "${displayStateDir}/${mainFilename}"`;
-    return formatted.map((line) => line.replace(mainCommand, quotedMainCommand));
+    return formatted.map((line) =>
+      line.replace(mainCommand, quotedMainCommand),
+    );
   };
   const setupCommand =
     stateDir === ".sandcastle"
@@ -925,31 +927,12 @@ const rewriteMainTs = (
       sandboxProvider.containerfileName !== null && hasCodingStandards
         ? `${sandboxProvider.factoryName}({ mounts: [{ hostPath: join(workflowDir, "CODING_STANDARDS.md"), sandboxPath: ".sandcastle/CODING_STANDARDS.md", readonly: true }] })`
         : `${sandboxProvider.factoryName}()`;
-    content = content.replace(
-      /\bdocker\(\)/g,
-      sandboxExpression,
-    );
+    content = content.replace(/\bdocker\(\)/g, sandboxExpression);
 
-    if (externalState) {
+    if (externalState && content.includes('from "zod"')) {
       content = content.replace(
         'import { fileURLToPath } from "node:url";',
         'import { fileURLToPath, pathToFileURL } from "node:url";',
-      );
-      const packageImport =
-        'await import(import.meta.resolve("@yogioo/sandcastle", pathToFileURL(join(process.cwd(), "package.json")).href))';
-      content = content.replace(
-        /import \* as sandcastle from "@yogioo\/sandcastle";/,
-        `const sandcastle = ${packageImport};`,
-      );
-      content = content.replace(
-        /import \{ ([^}]+) \} from "@yogioo\/sandcastle";/,
-        `const { $1 } = ${packageImport};`,
-      );
-      content = content.replace(
-        new RegExp(
-          `import \\\\{ ${sandboxProvider.factoryName} \\\\} from "@yogioo/sandcastle/sandboxes/${sandboxProvider.importSubpath}";`,
-        ),
-        `const { ${sandboxProvider.factoryName} } = await import(import.meta.resolve("@yogioo/sandcastle/sandboxes/${sandboxProvider.importSubpath}", pathToFileURL(join(process.cwd(), "package.json")).href));`,
       );
       content = content.replace(
         'import { z } from "zod";',
@@ -1158,8 +1141,9 @@ Work out, together with the user, the shell commands for:
 
 ## 3. Edit the scaffolded files in place
 
-${cliNamespace
-  ? `- **Dockerfile / Containerfile** — replace the line
+${
+  cliNamespace
+    ? `- **Dockerfile / Containerfile** — replace the line
 
   \`\`\`
   ${CUSTOM_TRACKER_TOOLS}
@@ -1167,8 +1151,9 @@ ${cliNamespace
 
   with the install steps for your tracker's CLI (if it needs one).
 `
-  : `- No Dockerfile or Containerfile is generated in host-only mode. Install the tracker's CLI on the host and make sure it is available on PATH.
-`}
+    : `- No Dockerfile or Containerfile is generated in host-only mode. Install the tracker's CLI on the host and make sure it is available on PATH.
+`
+}
 
 - **Prompt files (\`.sandcastle/*.md\`)** — replace the sentinel
 
@@ -1180,8 +1165,9 @@ ${cliNamespace
 
 - **\`.env.example\`** — replace the \`# TODO\` block with the real env var(s) your tracker needs, then tell the user to set them in \`.sandcastle/.env\`.
 
-${cliNamespace
-  ? `## 4. Build the image
+${
+  cliNamespace
+    ? `## 4. Build the image
 
 Once the files are wired up, build the sandbox image:
 
@@ -1192,9 +1178,10 @@ sandcastle ${cliNamespace} build-image
 ## 5. Verify
 
 Run your **list** command inside the built image and confirm it returns the open tasks as JSON. If it errors, fix the command or the auth and rebuild.`
-  : `## 4. Verify
+    : `## 4. Verify
 
-Run your **list** command on the host and confirm it returns the open tasks as JSON. If it errors, fix the command or the auth before running the agent.`}
+Run your **list** command on the host and confirm it returns the open tasks as JSON. If it errors, fix the command or the auth before running the agent.`
+}
 `.replaceAll(".sandcastle", displayConfigDir);
 };
 
@@ -1334,10 +1321,7 @@ export const scaffold = (
     if (stateDir && mainFilename === "main.ts") {
       scaffoldFiles.push(
         fs
-          .writeFileString(
-            join(configDir, "package.json"),
-            MODULE_PACKAGE_JSON,
-          )
+          .writeFileString(join(configDir, "package.json"), MODULE_PACKAGE_JSON)
           .pipe(Effect.mapError((e) => new Error(e.message))),
       );
     }

@@ -20,6 +20,7 @@ const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
   await execAsync('git config user.email "test@test.com"', { cwd: dir });
   await execAsync('git config user.name "Test"', { cwd: dir });
+  await execAsync('git commit --allow-empty -m "initial commit"', { cwd: dir });
 };
 
 const commitFile = async (
@@ -229,6 +230,68 @@ describe("sandcastle CLI", () => {
   it("init --help exposes --state-dir", async () => {
     const { stdout } = await runCli("init --help", process.cwd());
     expect(stdout).toContain("--state-dir");
+  });
+
+  it("init --help exposes --init-git", async () => {
+    const { stdout } = await runCli("init --help", process.cwd());
+    expect(stdout).toContain("--init-git");
+  });
+
+  it("init --init-git false aborts when the directory is not a git repository", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-init-git-no-"));
+
+    try {
+      await runCli(
+        `init "${hostDir}" --init-git false --agent codex --template blank --sandbox no-sandbox --issue-tracker beads`,
+        process.cwd(),
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      expect(stdout + stderr).toContain("requires a git repository");
+      await expect(readdir(join(hostDir, ".git"))).rejects.toThrow();
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("init without --init-git fails fast on a non-git directory in non-interactive mode", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-init-git-flag-"));
+
+    try {
+      await runCli(
+        `init "${hostDir}" --agent codex --template blank --sandbox no-sandbox --issue-tracker beads`,
+        process.cwd(),
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      expect(output).toContain("--init-git");
+      expect(output).toContain("non-interactive");
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("init --init-git true creates a git repository and scaffolds", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-init-git-yes-"));
+    const stateParent = await mkdtemp(join(tmpdir(), "cli-init-git-state-"));
+    const stateDir = join(stateParent, "state");
+
+    try {
+      const { stdout } = await runCli(
+        `init "${hostDir}" --state-dir "${stateDir}" --init-git true --agent codex --template blank --sandbox no-sandbox --issue-tracker beads`,
+        process.cwd(),
+      );
+
+      expect(stdout).toContain("Created git repository");
+      expect(stdout).toContain("Init complete");
+      await execAsync("git rev-parse --verify HEAD", { cwd: hostDir });
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(stateParent, { recursive: true, force: true });
+    }
   });
 
   it("init accepts a repository path and writes its external project manifest", async () => {

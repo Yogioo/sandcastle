@@ -43,6 +43,8 @@ sandcastle init
 
 也可以初始化另一个仓库：`sandcastle init C:/projects/another-repo`。在 Windows 上，默认位置类似 `%LOCALAPPDATA%\Sandcastle\projects\<项目标识>\.sandcastle\`。`init` 会登记项目清单并输出实际状态目录和入口文件；若需要自定义位置，传入 `--state-dir`。
 
+如果目标目录还不是 Git 仓库（或仓库里还没有任何 commit），`init` 会询问是否自动 `git init` 并创建一个空的初始 commit。选否会取消 `init`，等你自己处理好仓库后再跑。非交互模式用 `--init-git true|false`。
+
 3. `init` 会自动在输出的状态目录中创建 `.env`。如果需要自定义凭据，
 编辑该文件，填入 `CLAUDE_CODE_OAUTH_TOKEN`（在宿主机运行
 `claude setup-token` 获取）；若使用 Anthropic API Key，取消注释并填写
@@ -859,6 +861,8 @@ try {
 
 脚手架用户缓存中的 `.sandcastle/` 状态目录并按选择构建容器镜像。新仓库的第一步命令。init 时选择沙箱提供商（Docker、Podman 或 `no-sandbox`）。选 Podman 会写 `Containerfile` 而非 `Dockerfile`；选 `no-sandbox` 则不生成容器文件，也不会构建镜像，代理直接在宿主机运行。
 
+目标目录如果还不是 Git 仓库，或仓库里还没有任何 commit，init 会先询问是否自动创建仓库并写入一个空的初始 commit。选否会取消 init。非交互模式用 `--init-git true|false`。
+
 init 从 `packageManager` 字段或锁文件检测宿主机包管理器（npm、pnpm、yarn、bun），默认 npm。模板 `main` 若导入宿主机依赖——规划模板为 `<plan>` 输出 schema 导入 [Zod](https://zod.dev)——会在 `package.json` 中尚未存在时提示用该包管理器安装，避免首次运行缓存目录中的 `main.ts` 出现 `ERR_MODULE_NOT_FOUND`。
 
 init 的主要选项会在交互界面中选择；同时保留已有的 `--flag` 以支持 CI 和脚本。Git 模式不再作为独立交互选项——通过模板选择（`*-head` vs 默认）。stdin 非 TTY 且缺少必填 flag 时，init 快速失败并给出明确错误，而非卡在提示上。
@@ -874,6 +878,7 @@ init 的主要选项会在交互界面中选择；同时保留已有的 `--flag`
 | `--create-label`          | 否   | 交互提示                     | `true` / `false`——是否创建 `Sandcastle` GitHub 标签（仅 `github-issues`）     |
 | `--build-image`           | 否   | 交互提示                     | `true` / `false`——是否立即构建沙箱镜像（`custom` 或 `no-sandbox` 时静默忽略） |
 | `--install-template-deps` | 否   | 交互提示                     | `true` / `false`——是否安装模板宿主机依赖（如规划模板的 `zod`）                |
+| `--init-git`              | 否   | 交互提示                     | `true` / `false`——目标没有可用 Git 仓库时，是否自动 `git init` 并创建初始 commit |
 | `--state-dir`             | 否   | 用户缓存目录                 | 覆盖 Sandcastle 状态目录；CLI 不会自动回退到仓库内 `.sandcastle`              |
 
 默认在用户缓存状态目录创建以下文件：

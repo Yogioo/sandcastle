@@ -48,6 +48,7 @@ import type {
 } from "./InitService.js";
 import { ConfigDirError, InitError } from "./errors.js";
 import { VERSION } from "./version.js";
+import { initializeGitRepo, inspectGitRepo } from "./GitRepo.js";
 
 // --- Shared options ---
 
@@ -360,6 +361,13 @@ const installTemplateDepsOption = Options.choice("install-template-deps", [
   Options.optional,
 );
 
+const initGitOption = Options.choice("init-git", ["true", "false"]).pipe(
+  Options.withDescription(
+    "Whether to create a git repository and initial commit when the target has none",
+  ),
+  Options.optional,
+);
+
 /**
  * Translate an `Options.choice("flag", ["true", "false"]).optional` value into
  * a tri-state boolean. None when the flag was absent; otherwise the parsed bool.
@@ -382,6 +390,7 @@ const initCommand = Command.make(
     createLabel: createLabelOption,
     buildImage: buildImageOption,
     installTemplateDeps: installTemplateDepsOption,
+    initGit: initGitOption,
     stateDir: stateDirOption,
   },
   ({
@@ -395,6 +404,7 @@ const initCommand = Command.make(
     createLabel: createLabelFlag,
     buildImage: buildImageFlag,
     installTemplateDeps: installTemplateDepsFlag,
+    initGit: initGitFlag,
     stateDir: stateDirFlag,
   }) =>
     Effect.gen(function* () {
@@ -469,6 +479,7 @@ const initCommand = Command.make(
       const installTemplateDepsChoice = choiceToTriBool(
         installTemplateDepsFlag,
       );
+      const initGitChoice = choiceToTriBool(initGitFlag);
 
       const isInteractive = process.stdin.isTTY === true;
       const failIfNonInteractive = (flag: string) =>
@@ -505,6 +516,40 @@ const initCommand = Command.make(
           }
           return confirmed === true;
         });
+
+      const gitStatus = inspectGitRepo(cwd);
+      if (gitStatus !== "ready") {
+        const shouldInitGit = yield* resolveConfirmFlag({
+          choice: initGitChoice,
+          flag: "--init-git",
+          promptMessage:
+            gitStatus === "missing"
+              ? "This directory is not a git repository. Create one and make an initial commit now?"
+              : "This git repository has no commits yet. Create an initial commit now?",
+          cancelMessage: "Git initialization cancelled.",
+        });
+        if (!shouldInitGit) {
+          yield* Effect.fail(
+            new InitError({
+              message:
+                gitStatus === "missing"
+                  ? "Sandcastle requires a git repository with at least one commit. Run `git init` and make an initial commit, then re-run `sandcastle init`."
+                  : 'Sandcastle requires at least one git commit. Run `git commit --allow-empty -m "Initial commit"`, then re-run `sandcastle init`.',
+            }),
+          );
+        }
+        yield* Effect.try({
+          try: () => initializeGitRepo(cwd),
+          catch: (cause) =>
+            new InitError({
+              message: `Could not initialize git in "${cwd}": ${cause instanceof Error ? cause.message : String(cause)}`,
+            }),
+        });
+        yield* d.status(
+          "Created git repository with an initial commit.",
+          "success",
+        );
+      }
 
       // Resolve agent: CLI flag > interactive select
       const agents = listAgents();

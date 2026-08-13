@@ -54,14 +54,49 @@ describe("InitService scaffold", () => {
 
     const result = await runScaffold(repoDir, { stateDir });
 
-    await expect(access(join(stateDir, result.mainFilename))).resolves.toBeUndefined();
+    await expect(
+      access(join(stateDir, result.mainFilename)),
+    ).resolves.toBeUndefined();
     await expect(access(join(repoDir, ".sandcastle"))).rejects.toThrow();
 
     const main = await readFile(join(stateDir, result.mainFilename), "utf-8");
     expect(main).toContain("workflowDir");
     expect(main).toContain("stateDir: workflowDir");
     expect(main).toContain("promptFile: join(workflowDir");
-    expect(main).toContain("import.meta.resolve");
+    expect(main).toContain('from "@yogioo/sandcastle"');
+    expect(main).not.toContain("import.meta.resolve");
+  });
+
+  it("keeps sandbox provider imports when scaffolding outside the repo", async () => {
+    const repoDir = await makeDir();
+    const stateDir = join(repoDir, "cache", ".sandcastle");
+
+    await runScaffold(repoDir, {
+      stateDir,
+      templateName: "sequential-reviewer-head",
+      sandboxProvider: getSandboxProvider("no-sandbox")!,
+    });
+
+    const main = await readFile(join(stateDir, "main.mts"), "utf-8");
+    expect(main).toContain(
+      'import { noSandbox } from "@yogioo/sandcastle/sandboxes/no-sandbox"',
+    );
+    expect(main).not.toContain("import.meta.resolve");
+    expect(main).not.toContain('from "@yogioo/sandcastle/sandboxes/docker"');
+  });
+
+  it("resolves zod from the host package when the planner lives outside the repo", async () => {
+    const repoDir = await makeDir();
+    const stateDir = join(repoDir, "cache", ".sandcastle");
+
+    await runScaffold(repoDir, {
+      stateDir,
+      templateName: "parallel-planner",
+    });
+
+    const main = await readFile(join(stateDir, "main.mts"), "utf-8");
+    expect(main).toContain('import.meta.resolve("zod"');
+    expect(main).toContain('from "@yogioo/sandcastle"');
   });
 
   it("makes reviewer standards visible without exposing the env file", async () => {
@@ -662,7 +697,9 @@ describe("InitService scaffold", () => {
 
       const configDir = join(dir, ".sandcastle");
       const { access } = await import("node:fs/promises");
-      await expect(access(join(configDir, "main.mts"))).resolves.toBeUndefined();
+      await expect(
+        access(join(configDir, "main.mts")),
+      ).resolves.toBeUndefined();
       await expect(
         access(join(configDir, "implement-prompt.md")),
       ).resolves.toBeUndefined();
@@ -697,7 +734,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain('git rev-parse HEAD');
+      expect(mainTs).toContain("git rev-parse HEAD");
       expect(mainTs).toContain("BASE_SHA: baseSha");
       expect(mainTs).toContain("implement.commits.length");
     });
@@ -741,8 +778,12 @@ describe("InitService scaffold", () => {
 
       const configDir = join(dir, ".sandcastle");
       const { access } = await import("node:fs/promises");
-      await expect(access(join(configDir, "main.mts"))).resolves.toBeUndefined();
-      await expect(access(join(configDir, "prompt.md"))).resolves.toBeUndefined();
+      await expect(
+        access(join(configDir, "main.mts")),
+      ).resolves.toBeUndefined();
+      await expect(
+        access(join(configDir, "prompt.md")),
+      ).resolves.toBeUndefined();
 
       const mainTs = await readFile(join(configDir, "main.mts"), "utf-8");
       expect(mainTs).toContain('branchStrategy: { type: "head" }');

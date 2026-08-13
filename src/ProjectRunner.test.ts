@@ -1,7 +1,10 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { spawnProjectRunner } from "./ProjectRunner.js";
+import {
+  spawnProjectRunner,
+  withSandcastleResolveHook,
+} from "./ProjectRunner.js";
 
 describe("ProjectRunner", () => {
   it("spawns the generated entry with the repository cwd and forwards its exit code", async () => {
@@ -11,6 +14,7 @@ describe("ProjectRunner", () => {
           args: readonly string[];
           cwd: string | undefined;
           stdio: unknown;
+          nodeOptions: string | undefined;
         }
       | undefined;
 
@@ -24,6 +28,8 @@ describe("ProjectRunner", () => {
         args,
         cwd: options.cwd?.toString(),
         stdio: options.stdio,
+        nodeOptions: (options.env as NodeJS.ProcessEnv | undefined)
+          ?.NODE_OPTIONS,
       };
       const child = new EventEmitter();
       queueMicrotask(() => child.emit("close", 23));
@@ -38,22 +44,24 @@ describe("ProjectRunner", () => {
       ),
     ).resolves.toBe(23);
 
-    expect(received).toEqual({
-      command:
-        process.platform === "win32" ? process.env.ComSpec || "cmd.exe" : "npx",
-      args:
-        process.platform === "win32"
-          ? [
-              "/d",
-              "/c",
-              "npx.cmd",
-              "tsx",
-              "C:/cache/project/.sandcastle/main.mts",
-            ]
-          : ["tsx", "C:/cache/project/.sandcastle/main.mts"],
-      cwd: "C:/projects/example",
-      stdio: "inherit",
-    });
+    expect(received?.command).toBe(
+      process.platform === "win32" ? process.env.ComSpec || "cmd.exe" : "npx",
+    );
+    expect(received?.args).toEqual(
+      process.platform === "win32"
+        ? [
+            "/d",
+            "/c",
+            "npx.cmd",
+            "tsx",
+            "C:/cache/project/.sandcastle/main.mts",
+          ]
+        : ["tsx", "C:/cache/project/.sandcastle/main.mts"],
+    );
+    expect(received?.cwd).toBe("C:/projects/example");
+    expect(received?.stdio).toBe("inherit");
+    expect(received?.nodeOptions).toContain("--import=");
+    expect(received?.nodeOptions).toContain("register-sandcastle.js");
   });
 
   it("treats a child process without an exit code as a failed run", async () => {
@@ -70,5 +78,14 @@ describe("ProjectRunner", () => {
         spawnProcess,
       ),
     ).resolves.toBe(1);
+  });
+
+  it("does not duplicate the resolve hook in NODE_OPTIONS", () => {
+    const once = withSandcastleResolveHook({ NODE_OPTIONS: "" });
+    const twice = withSandcastleResolveHook(once);
+    const flag = "--import=";
+    const matches = twice.NODE_OPTIONS?.match(/--import=/g) ?? [];
+    expect(matches).toHaveLength(1);
+    expect(twice.NODE_OPTIONS).toContain(flag);
   });
 });
