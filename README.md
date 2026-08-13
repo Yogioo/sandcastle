@@ -857,6 +857,8 @@ try {
 
 选择 `no-sandbox` 会使用 `noSandbox()`，代理命令直接在宿主机执行。需要 head 模式时选择 `simple-loop-head` 或 `sequential-reviewer-head`（直接修改当前工作目录）。`sequential-reviewer`、`parallel-planner` 和 `parallel-planner-with-review` 依赖独立 worktree，程序化传入 `useWorktree: false` 仍会被拒绝。
 
+`sequential-reviewer` 与 `sequential-reviewer-head` 默认每 30 秒在宿主机上轮询 `LIST_TASKS_COMMAND`：没有可接工单时等待而不启动代理；有工单时才进入实现→审查。空转不计入 `MAX_ITERATIONS`。把生成的 `main` 里的 `IDLE_POLL_SECONDS` 设为 `0` 可改回 backlog 为空即退出。
+
 ## CLI 命令
 
 ### `sandcastle init`

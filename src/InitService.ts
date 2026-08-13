@@ -801,6 +801,11 @@ export function getNextStepsLines(
         `${step++}. Customize .sandcastle/CODING_STANDARDS.md with your project's standards — the reviewer agent loads it during review`,
       );
     }
+    if (template.startsWith("sequential-reviewer")) {
+      lines.push(
+        `${step++}. Optional: set \`IDLE_POLL_SECONDS\` in .sandcastle/${mainFilename} to 0 to exit when no issues are ready instead of polling`,
+      );
+    }
     lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
     return formatStateLines(lines);
   }
@@ -987,8 +992,10 @@ const rewriteWorktreeMode = (content: string): string => {
 
 /**
  * When the user opted out of the Sandcastle label, strip ` --label Sandcastle`
- * from all `.md` files in the scaffolded config directory so that `gh issue list`
- * commands work without a label filter.
+ * from scaffolded prompt and runner files so that `gh issue list` commands
+ * work without a label filter. `.mts`/`.ts` are included because sequential
+ * reviewer templates bake `LIST_TASKS_COMMAND` into `main` for host-side
+ * idle polling.
  */
 const rewritePromptFiles = (
   configDir: string,
@@ -998,9 +1005,11 @@ const rewritePromptFiles = (
     const files = yield* fs
       .readDirectory(configDir)
       .pipe(Effect.mapError((e) => new Error(e.message)));
-    const mdFiles = files.filter((f) => f.endsWith(".md"));
+    const rewriteFiles = files.filter(
+      (f) => f.endsWith(".md") || f.endsWith(".mts") || f.endsWith(".ts"),
+    );
     yield* Effect.all(
-      mdFiles.map((f) =>
+      rewriteFiles.map((f) =>
         Effect.gen(function* () {
           const filePath = join(configDir, f);
           const content = yield* fs
@@ -1066,6 +1075,8 @@ const TEXT_FILE_EXTENSIONS = new Set([
   ".txt",
   ".env",
   ".example",
+  ".mts",
+  ".ts",
   // Dockerfile / Containerfile have no extension — handled by name check below
 ]);
 

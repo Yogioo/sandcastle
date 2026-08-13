@@ -698,6 +698,28 @@ describe("InitService scaffold", () => {
       expect(mainTs).not.toContain("!implement.commits.length");
     });
 
+    it("main.mts probes the host list before createSandbox and defaults to idle-and-poll", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "sequential-reviewer" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("const IDLE_POLL_SECONDS = 30;");
+      expect(mainTs).toContain("probeReadyTasks");
+      expect(mainTs).toContain("while (iteration < MAX_ITERATIONS)");
+      expect(mainTs).toContain("iteration += 1");
+      expect(mainTs.indexOf("probeReadyTasks")).toBeLessThan(
+        mainTs.indexOf("await sandcastle.createSandbox"),
+      );
+      expect(mainTs.indexOf("probed.count <= 0")).toBeLessThan(
+        mainTs.indexOf("iteration += 1"),
+      );
+      expect(mainTs).toContain("gh issue list");
+      expect(mainTs).not.toContain("{{LIST_TASKS_COMMAND}}");
+    });
+
     it("main.mts resumes once on StructuredOutputError then falls back to git", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "sequential-reviewer" });
@@ -814,6 +836,28 @@ describe("InitService scaffold", () => {
       expect(mainTs).toContain("Output.object");
       expect(mainTs).toContain('tag: "outcome"');
       expect(mainTs).toContain('from "zod"');
+    });
+
+    it("main.mts probes the host list before run() and defaults to idle-and-poll", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "sequential-reviewer-head" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("const IDLE_POLL_SECONDS = 30;");
+      expect(mainTs).toContain("probeReadyTasks");
+      expect(mainTs).toContain("while (iteration < MAX_ITERATIONS)");
+      expect(mainTs).toContain("iteration += 1");
+      expect(mainTs.indexOf("probeReadyTasks")).toBeLessThan(
+        mainTs.indexOf("await run("),
+      );
+      expect(mainTs.indexOf("probed.count <= 0")).toBeLessThan(
+        mainTs.indexOf("iteration += 1"),
+      );
+      expect(mainTs).toContain("gh issue list");
+      expect(mainTs).not.toContain("{{LIST_TASKS_COMMAND}}");
     });
 
     it("main.mts resumes once on StructuredOutputError then falls back to git", async () => {
@@ -1075,6 +1119,18 @@ describe("InitService scaffold", () => {
       );
     });
 
+    it("sequential-reviewer next steps mention IDLE_POLL_SECONDS", () => {
+      const reviewer = next("sequential-reviewer", "main.mts").join("\n");
+      const head = next("sequential-reviewer-head", "main.mts").join("\n");
+      expect(reviewer).toContain("IDLE_POLL_SECONDS");
+      expect(reviewer).toContain("to 0");
+      expect(head).toContain("IDLE_POLL_SECONDS");
+      expect(head).toContain("to 0");
+      expect(next("simple-loop", "main.mts").join("\n")).not.toContain(
+        "IDLE_POLL_SECONDS",
+      );
+    });
+
     it("planner zod step uses the detected package manager's add command", () => {
       expect(next("parallel-planner", "main.mts", "pnpm").join("\n")).toContain(
         "pnpm add zod",
@@ -1311,6 +1367,21 @@ describe("InitService scaffold", () => {
     expect(prompt).toContain("gh issue list");
   });
 
+  it("sequential-reviewer main.mts strips --label Sandcastle when createLabel is false", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      templateName: "sequential-reviewer",
+      createLabel: false,
+    });
+
+    const mainTs = await readFile(
+      join(dir, ".sandcastle", "main.mts"),
+      "utf-8",
+    );
+    expect(mainTs).not.toContain("--label Sandcastle");
+    expect(mainTs).toContain("gh issue list");
+  });
+
   it("scaffolded prompts that lack a runtime TASK_ID do not contain {{TASK_ID}}", async () => {
     // Regression test for #477: the {{TASK_ID}} placeholder inside
     // VIEW_TASK_COMMAND / CLOSE_TASK_COMMAND used to leak into prompts
@@ -1405,6 +1476,19 @@ describe("InitService scaffold", () => {
       );
       expect(mainTs).toContain("claudeCode()");
       expect(mainTs).not.toContain('claudeCode("');
+    });
+
+    it("main.mts keeps prompt-argument placeholders that are not issue-tracker template args", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "parallel-planner" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("{{BRANCHES}}");
+      expect(mainTs).toContain("{{ISSUES}}");
+      expect(mainTs).toContain("{{TASK_ID}}");
     });
 
     it("implement-prompt.md contains {{TASK_ID}}, {{ISSUE_TITLE}}, {{BRANCH}} prompt arguments", async () => {
@@ -2101,6 +2185,22 @@ describe("InitService scaffold", () => {
       expect(prompt).not.toContain("gh issue close");
       expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
       expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
+    });
+
+    it("sequential-reviewer main.mts substitutes LIST_TASKS_COMMAND for host-side polling", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "sequential-reviewer",
+        issueTracker: getIssueTracker("beads"),
+      });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("bd ready --json");
+      expect(mainTs).not.toContain("{{LIST_TASKS_COMMAND}}");
+      expect(mainTs).not.toContain("gh issue list");
     });
 
     it("sequential-reviewer implement-prompt uses backlog-agnostic language", async () => {
