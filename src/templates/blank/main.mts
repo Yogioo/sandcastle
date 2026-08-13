@@ -1,12 +1,19 @@
-import { run, claudeCode } from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { run, claudeCode } from "@yogioo/sandcastle";
+import { docker } from "@yogioo/sandcastle/sandboxes/docker";
+import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+
+const repoDir = process.cwd();
+const workflowDir = fileURLToPath(new URL(".", import.meta.url));
 
 // Blank template: customize this to build your own orchestration.
-// Run this with: npx tsx .sandcastle/main.mts
-// Or add to package.json scripts: "sandcastle": "npx tsx .sandcastle/main.mts"
+// Run this with the path printed by `sandcastle init`.
+// The generated entry file is main.mts (or main.ts for ESM projects).
 
 await run({
+  cwd: repoDir,
+  stateDir: workflowDir,
   agent: claudeCode("claude-opus-4-8"),
   sandbox: docker(),
-  promptFile: "./.sandcastle/prompt.md",
+  promptFile: join(workflowDir, "prompt.md"),
 });

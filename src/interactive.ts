@@ -42,6 +42,7 @@ import {
 import { noSandbox } from "./sandboxes/no-sandbox.js";
 import { raceAbortSignal } from "./raceAbortSignal.js";
 import { resolveCwd } from "./resolveCwd.js";
+import { resolveRuntimeStateDir } from "./StateDir.js";
 import type { Timeouts } from "./run.js";
 
 export interface InteractiveOptions {
@@ -74,6 +75,8 @@ export interface InteractiveOptions {
    * or is not a directory.
    */
   readonly cwd?: string;
+  /** Root for Sandcastle-owned env, logs, worktrees, and patches. Defaults to the per-user project cache. */
+  readonly stateDir?: string;
   /**
    * An `AbortSignal` that cancels the interactive session when aborted.
    *
@@ -162,6 +165,7 @@ export const interactive = async (
 
   const inner = Effect.gen(function* () {
     const hostRepoDir = yield* resolveCwd(options.cwd);
+    const stateDir = resolveRuntimeStateDir(hostRepoDir, options.stateDir);
     const d = yield* Display;
 
     // 1. Resolve prompt (from string or file), or skip if neither provided
@@ -173,7 +177,7 @@ export const interactive = async (
     const isInlinePrompt = resolved?.source === "inline";
 
     // 2. Resolve env vars
-    const resolvedEnv = yield* resolveEnv(hostRepoDir);
+    const resolvedEnv = yield* resolveEnv(hostRepoDir, stateDir);
     const env = mergeProviderEnv({
       resolvedEnv,
       agentProviderEnv: provider.env,
@@ -250,12 +254,21 @@ export const interactive = async (
 
     if (!isHeadMode) {
       worktreeInfo = yield* d.taskLog("Creating worktree", () =>
-        WorktreeManager.pruneStale(hostRepoDir).pipe(
+        WorktreeManager.pruneStale(
+          hostRepoDir,
+          join(stateDir, "worktrees"),
+        ).pipe(
           Effect.catchAll(() => Effect.void),
           Effect.andThen(
             branch
-              ? WorktreeManager.create(hostRepoDir, { branch })
-              : WorktreeManager.create(hostRepoDir, { name: options.name }),
+              ? WorktreeManager.create(hostRepoDir, {
+                  branch,
+                  worktreesDir: join(stateDir, "worktrees"),
+                })
+              : WorktreeManager.create(hostRepoDir, {
+                  name: options.name,
+                  worktreesDir: join(stateDir, "worktrees"),
+                }),
           ),
         ),
       );
@@ -341,7 +354,7 @@ export const interactive = async (
     }).pipe(
       Effect.tapError(() =>
         worktreeInfo
-          ? WorktreeManager.remove(worktreeInfo.path).pipe(
+          ? WorktreeManager.remove(worktreeInfo.path, hostRepoDir).pipe(
               Effect.catchAll(() => Effect.void),
             )
           : Effect.void,
@@ -365,7 +378,12 @@ export const interactive = async (
 
       const applyToHost =
         sandboxProvider.tag === "isolated" && worktreeInfo
-          ? () => syncOut(worktreeInfo!.path, handle as IsolatedSandboxHandle)
+          ? () =>
+              syncOut(
+                worktreeInfo!.path,
+                handle as IsolatedSandboxHandle,
+                stateDir,
+              )
           : () => Effect.void; // bind-mount and no-sandbox don't need sync
 
       const lifecycleEffect = withSandboxLifecycle(
@@ -431,7 +449,7 @@ export const interactive = async (
 
       // Clean up worktree if not preserved
       if (worktreeInfo && !preservedWorktreePath) {
-        yield* WorktreeManager.remove(worktreeInfo.path).pipe(
+        yield* WorktreeManager.remove(worktreeInfo.path, hostRepoDir).pipe(
           Effect.catchAll(() => Effect.void),
         );
       }
@@ -456,7 +474,7 @@ export const interactive = async (
       // On error, always clean up worktree (on success, handled above with preserve check)
       Effect.tapError(() =>
         worktreeInfo
-          ? WorktreeManager.remove(worktreeInfo.path).pipe(
+          ? WorktreeManager.remove(worktreeInfo.path, hostRepoDir).pipe(
               Effect.catchAll(() => Effect.void),
             )
           : Effect.void,

@@ -12,6 +12,19 @@ const runResolveEnv = (dir: string) =>
   Effect.runPromise(resolveEnv(dir).pipe(Effect.provide(NodeContext.layer)));
 
 describe("resolveEnv", () => {
+  it("reads .env from an explicit external directory", async () => {
+    const repoDir = await makeDir();
+    const stateDir = await makeDir();
+    await writeFile(join(repoDir, ".env"), "REPO_KEY=ignored\n");
+    await writeFile(join(stateDir, ".env"), "EXTERNAL_KEY=external\n");
+
+    const env = await Effect.runPromise(
+      resolveEnv(repoDir, stateDir).pipe(Effect.provide(NodeContext.layer)),
+    );
+
+    expect(env).toEqual({ EXTERNAL_KEY: "external" });
+  });
+
   it("returns all key-value pairs from .sandcastle/.env", async () => {
     const dir = await makeDir();
     await mkdir(join(dir, ".sandcastle"));
@@ -201,10 +214,7 @@ describe("resolveEnv", () => {
   it("unescapes \\n in double-quoted values", async () => {
     const dir = await makeDir();
     await mkdir(join(dir, ".sandcastle"));
-    await writeFile(
-      join(dir, ".sandcastle", ".env"),
-      'KEY="line1\\nline2"\n',
-    );
+    await writeFile(join(dir, ".sandcastle", ".env"), 'KEY="line1\\nline2"\n');
 
     const env = await runResolveEnv(dir);
     expect(env["KEY"]).toBe("line1\nline2");
@@ -213,10 +223,7 @@ describe("resolveEnv", () => {
   it("does not unescape \\n in single-quoted values", async () => {
     const dir = await makeDir();
     await mkdir(join(dir, ".sandcastle"));
-    await writeFile(
-      join(dir, ".sandcastle", ".env"),
-      "KEY='line1\\nline2'\n",
-    );
+    await writeFile(join(dir, ".sandcastle", ".env"), "KEY='line1\\nline2'\n");
 
     const env = await runResolveEnv(dir);
     expect(env["KEY"]).toBe("line1\\nline2");
@@ -225,10 +232,7 @@ describe("resolveEnv", () => {
   it("preserves internal whitespace in double-quoted values", async () => {
     const dir = await makeDir();
     await mkdir(join(dir, ".sandcastle"));
-    await writeFile(
-      join(dir, ".sandcastle", ".env"),
-      'KEY="  spaced  "\n',
-    );
+    await writeFile(join(dir, ".sandcastle", ".env"), 'KEY="  spaced  "\n');
 
     const env = await runResolveEnv(dir);
     expect(env["KEY"]).toBe("  spaced  ");
@@ -251,10 +255,7 @@ describe("resolveEnv", () => {
   it("handles escaped backslash before n in double-quoted values", async () => {
     const dir = await makeDir();
     await mkdir(join(dir, ".sandcastle"));
-    await writeFile(
-      join(dir, ".sandcastle", ".env"),
-      'KEY="a\\\\nb"\n',
-    );
+    await writeFile(join(dir, ".sandcastle", ".env"), 'KEY="a\\\\nb"\n');
 
     const env = await runResolveEnv(dir);
     // \\n in the file → literal backslash + literal n (not a newline)

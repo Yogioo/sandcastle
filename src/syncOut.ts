@@ -3,7 +3,8 @@
  *
  * Two-phase approach:
  * 1. Save phase: eagerly save all artifacts (patches, diff, untracked files)
- *    to `.sandcastle/patches/<timestamp>/` before attempting to apply.
+ *    to the configured state directory's `patches/<timestamp>/` before
+ *    attempting to apply.
  * 2. Apply phase: apply from the saved directory.
  *    - On success: clean up the patch directory.
  *    - On failure: preserve the patch directory and print recovery commands.
@@ -135,6 +136,7 @@ const isEmptyPatch = (patchPath: string): Effect.Effect<boolean, SyncError> =>
  */
 const createPatchDir = (
   hostRepoDir: string,
+  stateDir = join(hostRepoDir, ".sandcastle"),
 ): Effect.Effect<string, SyncError> =>
   Effect.tryPromise({
     try: async () => {
@@ -142,7 +144,7 @@ const createPatchDir = (
       const pad = (n: number) => String(n).padStart(2, "0");
       const base = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 
-      const patchesRoot = join(hostRepoDir, ".sandcastle", "patches");
+      const patchesRoot = join(stateDir, "patches");
       await mkdir(patchesRoot, { recursive: true });
 
       let dirName = base;
@@ -213,12 +215,13 @@ export const countCommitsToSync = (
  * Sync changes from an isolated sandbox back to the host repo.
  *
  * Two-phase extraction with artifact persistence:
- * 1. Save all artifacts to `.sandcastle/patches/<timestamp>/`
+ * 1. Save all artifacts to the configured state directory's patches folder
  * 2. Apply from saved directory; on failure, preserve artifacts and print recovery
  */
 export const syncOut = (
   hostRepoDir: string,
   handle: IsolatedSandboxHandle,
+  stateDir?: string,
 ): Effect.Effect<void, SyncError> =>
   Effect.gen(function* () {
     const worktreePath = handle.worktreePath;
@@ -277,8 +280,13 @@ export const syncOut = (
     }
 
     // --- Phase 1: Save all artifacts ---
-    const patchDir = yield* createPatchDir(hostRepoDir);
-    const relativePatchDir = join(".sandcastle", "patches", basename(patchDir));
+    const patchDir = yield* createPatchDir(
+      hostRepoDir,
+      stateDir ?? join(hostRepoDir, ".sandcastle"),
+    );
+    const recoveryPatchDir = stateDir
+      ? patchDir
+      : join(".sandcastle", "patches", basename(patchDir));
 
     const nonEmptyPatches: string[] = [];
 
@@ -422,7 +430,7 @@ export const syncOut = (
     // --- Cleanup or preserve ---
     if (failedStep) {
       const msg = buildRecoveryMessage({
-        patchDir: relativePatchDir,
+        patchDir: recoveryPatchDir,
         failedStep,
         hasCommits: nonEmptyPatches.length > 0,
         hasDiff,
@@ -433,7 +441,10 @@ export const syncOut = (
       yield* Effect.tryPromise({
         try: async () => {
           await rm(patchDir, { recursive: true, force: true });
-          const patchesRoot = join(hostRepoDir, ".sandcastle", "patches");
+          const patchesRoot = join(
+            stateDir ?? join(hostRepoDir, ".sandcastle"),
+            "patches",
+          );
           try {
             const remaining = await readdir(patchesRoot);
             if (remaining.length === 0) {

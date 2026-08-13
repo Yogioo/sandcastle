@@ -19,23 +19,35 @@ Sandcastle is a TypeScript CLI tool that orchestrates AI coding agents inside is
 ### 1. Install
 
 ```bash
-npm install --save-dev @ai-hero/sandcastle
+npm install -g @yogioo/sandcastle
 ```
+
+The global install provides the primary `sandcastle` command. If you do not
+want a global install, use `npx @yogioo/sandcastle` as a fallback.
 
 ### 2. Initialize
 
-Run `npx @ai-hero/sandcastle init` in your repository to scaffold the config directory:
+Run `sandcastle init [path]` in your repository to scaffold the workflow and
+state directory in the per-user cache. The path is optional and defaults to
+the current working directory:
 
 ```bash
-npx @ai-hero/sandcastle init
+sandcastle init
 ```
 
-This creates a `.sandcastle/` directory with a Dockerfile, prompt file, and configuration.
+On Windows this defaults to `%LOCALAPPDATA%/Sandcastle/projects/<project-id>/.sandcastle/`.
+The command prints the actual directory and entry-file paths and writes a
+project manifest there. Use `--state-dir` to select an explicit state
+directory; the CLI never falls back to a repository-local `.sandcastle`.
 
 ### 3. Run
 
 ```bash
-npx tsx .sandcastle/main.ts
+sandcastle
 ```
 
-Sandcastle will build the Docker image, sync your code into the sandbox, and start the agent.
+When the current directory is a registered project, Sandcastle runs it
+directly. Otherwise it offers a compact project selector; you can also run a
+specific project with `sandcastle <path>`. The generated entry file is launched
+internally. Use `npx @yogioo/sandcastle` in place of `sandcastle` when using
+the fallback installation path.

@@ -90,6 +90,29 @@ describe("createWorktree", () => {
     }
   });
 
+  it("places worktrees in an external state directory", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-external-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    const stateDir = join(hostDir, "cache", ".sandcastle");
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "external-branch" },
+      cwd: hostDir,
+      stateDir,
+    });
+
+    try {
+      expect(ws.worktreePath).toContain(
+        join("cache", ".sandcastle", "worktrees"),
+      );
+      expect(existsSync(join(hostDir, ".sandcastle"))).toBe(false);
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
   it("creates a worktree with baseBranch forking from specified ref", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "ws-test-"));
     await initRepo(hostDir);

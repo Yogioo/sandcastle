@@ -49,17 +49,16 @@ const parseEnvFile = (
 /**
  * Resolve all env vars from .env files with process.env fallback.
  *
- * Precedence: .sandcastle/.env > process.env
- * Only keys declared in .sandcastle/.env are resolved from process.env.
+ * Precedence: <envDir>/.env > process.env
+ * Only keys declared in <envDir>/.env are resolved from process.env.
  * Repo root .env is not part of the resolution chain.
  */
 export const resolveEnv = (
   repoDir: string,
+  envDir: string = join(repoDir, ".sandcastle"),
 ): Effect.Effect<Record<string, string>, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
-    const sandcastleEnv = yield* parseEnvFile(
-      join(repoDir, ".sandcastle", ".env"),
-    );
+    const sandcastleEnv = yield* parseEnvFile(join(envDir, ".env"));
 
     const result: Record<string, string> = {};
     for (const key of Object.keys(sandcastleEnv)) {

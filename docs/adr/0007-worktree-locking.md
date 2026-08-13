@@ -33,7 +33,7 @@ Lock creation must be atomic (e.g. `fs.open` with `O_EXCL` flag or equivalent) t
 3. If alive — fail fast with a clear error: "Worktree is in use by process &lt;PID&gt;".
 4. If dead — remove the stale lock and reacquire.
 
-There is no wait/retry behavior. Contention means two callers targeted the same branch, which is a caller error. This is consistent with the project's fail-fast philosophy (see `.out-of-scope/provider-error-retry.md`).
+There is no wait/retry behavior. Contention means two callers targeted the same branch, which is a caller error. This is consistent with the project's fail-fast philosophy (see [ADR 0021](0021-provider-error-retry.md)).
 
 ### Lock release
 

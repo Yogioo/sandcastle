@@ -1,6 +1,6 @@
 import { NodeFileSystem } from "@effect/platform-node";
 import { Effect } from "effect";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -12,6 +12,7 @@ import {
   listIssueTrackers,
   getIssueTracker,
   getSandboxProvider,
+  validateScaffoldOptions,
 } from "./InitService.js";
 import type {
   AgentEntry,
@@ -47,6 +48,76 @@ const runScaffold = (repoDir: string, options?: Partial<ScaffoldOptions>) =>
 // ---------------------------------------------------------------------------
 
 describe("InitService scaffold", () => {
+  it("can scaffold into an external state directory without creating repo files", async () => {
+    const repoDir = await makeDir();
+    const stateDir = join(repoDir, "cache", ".sandcastle");
+
+    const result = await runScaffold(repoDir, { stateDir });
+
+    await expect(access(join(stateDir, result.mainFilename))).resolves.toBeUndefined();
+    await expect(access(join(repoDir, ".sandcastle"))).rejects.toThrow();
+
+    const main = await readFile(join(stateDir, result.mainFilename), "utf-8");
+    expect(main).toContain("workflowDir");
+    expect(main).toContain("stateDir: workflowDir");
+    expect(main).toContain("promptFile: join(workflowDir");
+    expect(main).toContain("import.meta.resolve");
+  });
+
+  it("makes reviewer standards visible without exposing the env file", async () => {
+    const repoDir = await makeDir();
+    const stateDir = join(repoDir, "cache", ".sandcastle");
+    const dockerProvider = getSandboxProvider("docker")!;
+
+    await runScaffold(repoDir, {
+      stateDir,
+      templateName: "sequential-reviewer",
+      sandboxProvider: dockerProvider,
+    });
+
+    const main = await readFile(join(stateDir, "main.mts"), "utf-8");
+    const reviewPrompt = await readFile(
+      join(stateDir, "review-prompt.md"),
+      "utf-8",
+    );
+    expect(main).toContain("CODING_STANDARDS.md");
+    expect(main).toContain('sandboxPath: ".sandcastle/CODING_STANDARDS.md"');
+    expect(reviewPrompt).toContain("@.sandcastle/CODING_STANDARDS.md");
+  });
+
+  it("uses the host standards path for reviewer no-sandbox scaffolds", async () => {
+    const repoDir = await makeDir();
+    const stateDir = join(repoDir, "cache", ".sandcastle");
+
+    await runScaffold(repoDir, {
+      stateDir,
+      templateName: "sequential-reviewer",
+      sandboxProvider: getSandboxProvider("no-sandbox")!,
+    });
+
+    const reviewPrompt = await readFile(
+      join(stateDir, "review-prompt.md"),
+      "utf-8",
+    );
+    expect(reviewPrompt).toContain(
+      `@${stateDir.replace(/\\/g, "/")}/CODING_STANDARDS.md`,
+    );
+    expect(reviewPrompt).not.toContain("@.sandcastle/CODING_STANDARDS.md");
+  });
+
+  it("makes an external main.ts directory an ESM package", async () => {
+    const repoDir = await makeDir();
+    const stateDir = join(repoDir, "cache", ".sandcastle");
+    await writeFile(join(repoDir, "package.json"), '{"type":"module"}');
+
+    const result = await runScaffold(repoDir, { stateDir });
+
+    expect(result.mainFilename).toBe("main.ts");
+    expect(await readFile(join(stateDir, "package.json"), "utf-8")).toContain(
+      '"type": "module"',
+    );
+  });
+
   it("uses agent dockerfileTemplate for Dockerfile (with templateArgs substitution)", async () => {
     const dir = await makeDir();
     await runScaffold(dir);
@@ -171,7 +242,7 @@ describe("InitService scaffold", () => {
     );
   });
 
-  it("includes .env, logs/, and worktrees/ in .gitignore but not patches/", async () => {
+  it("includes all runtime state directories in .gitignore", async () => {
     const dir = await makeDir();
     await runScaffold(dir);
 
@@ -182,7 +253,7 @@ describe("InitService scaffold", () => {
     expect(gitignore).toContain(".env");
     expect(gitignore).toContain("logs/");
     expect(gitignore).toContain("worktrees/");
-    expect(gitignore).not.toContain("patches/");
+    expect(gitignore).toContain("patches/");
   });
 
   it("Dockerfile template contains worktree mount comment", async () => {
@@ -258,7 +329,7 @@ describe("InitService scaffold", () => {
     await expect(access(join(configDir, "main.mts"))).resolves.toBeUndefined();
   });
 
-  it("blank template main.mts imports from @ai-hero/sandcastle", async () => {
+  it("blank template main.mts imports from @yogioo/sandcastle", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "blank" });
 
@@ -266,7 +337,7 @@ describe("InitService scaffold", () => {
       join(dir, ".sandcastle", "main.mts"),
       "utf-8",
     );
-    expect(mainTs).toContain('"@ai-hero/sandcastle"');
+    expect(mainTs).toContain('"@yogioo/sandcastle"');
   });
 
   it("blank template main.mts calls run()", async () => {
@@ -336,7 +407,7 @@ describe("InitService scaffold", () => {
     await expect(access(join(configDir, "prompt.md"))).resolves.toBeUndefined();
   });
 
-  it("simple-loop main.mts imports from @ai-hero/sandcastle", async () => {
+  it("simple-loop main.mts imports from @yogioo/sandcastle", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop" });
 
@@ -344,7 +415,7 @@ describe("InitService scaffold", () => {
       join(dir, ".sandcastle", "main.mts"),
       "utf-8",
     );
-    expect(mainTs).toContain('"@ai-hero/sandcastle"');
+    expect(mainTs).toContain('"@yogioo/sandcastle"');
   });
 
   it("simple-loop main.mts contains sandcastle.run() with expected options", async () => {
@@ -397,7 +468,7 @@ describe("InitService scaffold", () => {
       ).resolves.toBeUndefined();
     });
 
-    it("main.mts imports from @ai-hero/sandcastle", async () => {
+    it("main.mts imports from @yogioo/sandcastle", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
@@ -405,7 +476,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain('"@ai-hero/sandcastle"');
+      expect(mainTs).toContain('"@yogioo/sandcastle"');
     });
 
     it("main.mts uses createSandbox so implementer and reviewer share a sandbox", async () => {
@@ -1002,7 +1073,7 @@ describe("InitService scaffold", () => {
       expect(mainTs).toContain("sandcastle");
     });
 
-    it("main.mts imports from @ai-hero/sandcastle", async () => {
+    it("main.mts imports from @yogioo/sandcastle", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner" });
 
@@ -1010,7 +1081,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain('"@ai-hero/sandcastle"');
+      expect(mainTs).toContain('"@yogioo/sandcastle"');
     });
 
     it("main.mts references the specified model for all factory calls", async () => {
@@ -1105,7 +1176,7 @@ describe("InitService scaffold", () => {
       ).resolves.toBeUndefined();
     });
 
-    it("main.mts imports from @ai-hero/sandcastle", async () => {
+    it("main.mts imports from @yogioo/sandcastle", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
@@ -1113,7 +1184,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain('"@ai-hero/sandcastle"');
+      expect(mainTs).toContain('"@yogioo/sandcastle"');
     });
 
     it("main.mts uses createSandbox for shared sandbox per branch", async () => {
@@ -1604,6 +1675,23 @@ describe("InitService scaffold", () => {
       );
       expect(setup).toContain("sandcastle podman build-image");
       expect(setup).not.toContain("sandcastle docker build-image");
+    });
+
+    it("custom host-only setup skips container instructions", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        issueTracker: customManager,
+        sandboxProvider: getSandboxProvider("no-sandbox"),
+      });
+
+      const setup = await readFile(
+        join(dir, ".sandcastle", "SETUP_ISSUE_TRACKER.md"),
+        "utf-8",
+      );
+      expect(setup).toContain("No Dockerfile or Containerfile");
+      expect(setup).toContain("Run your **list** command on the host");
+      expect(setup).not.toContain("build-image");
     });
 
     it("non-custom issue trackers do not scaffold SETUP_ISSUE_TRACKER.md", async () => {
@@ -2197,7 +2285,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainContent).toContain("@ai-hero/sandcastle");
+      expect(mainContent).toContain("@yogioo/sandcastle");
     });
 
     it("scaffolds main.mts when package.json has type: commonjs", async () => {
@@ -2242,7 +2330,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.ts"),
         "utf-8",
       );
-      expect(mainContent).toContain("@ai-hero/sandcastle");
+      expect(mainContent).toContain("@yogioo/sandcastle");
       expect(mainContent).toContain('claudeCode("claude-opus-4-8")');
     });
 
@@ -2348,7 +2436,7 @@ describe("InitService scaffold", () => {
         "utf-8",
       );
       expect(mainTs).toContain(
-        'import { podman } from "@ai-hero/sandcastle/sandboxes/podman"',
+        'import { podman } from "@yogioo/sandcastle/sandboxes/podman"',
       );
       expect(mainTs).toContain("sandbox: podman()");
       expect(mainTs).not.toContain("docker");
@@ -2379,12 +2467,105 @@ describe("InitService scaffold", () => {
         "utf-8",
       );
       expect(mainTs).toContain(
-        'import { run, claudeCode } from "@ai-hero/sandcastle"',
+        'import { run, claudeCode } from "@yogioo/sandcastle"',
       );
       expect(mainTs).toContain(
-        'import { docker } from "@ai-hero/sandcastle/sandboxes/docker"',
+        'import { docker } from "@yogioo/sandcastle/sandboxes/docker"',
       );
       expect(mainTs).toContain("sandbox: docker()");
+    });
+
+    it("selecting no-sandbox does not write Dockerfile or Containerfile", async () => {
+      const dir = await makeDir();
+      const noSandboxProvider = getSandboxProvider("no-sandbox")!;
+      await runScaffold(dir, { sandboxProvider: noSandboxProvider });
+
+      const { access } = await import("node:fs/promises");
+      await expect(
+        access(join(dir, ".sandcastle", "Dockerfile")),
+      ).rejects.toThrow();
+      await expect(
+        access(join(dir, ".sandcastle", "Containerfile")),
+      ).rejects.toThrow();
+    });
+
+    it("selecting no-sandbox rewrites main to import and call noSandbox", async () => {
+      const dir = await makeDir();
+      const noSandboxProvider = getSandboxProvider("no-sandbox")!;
+      await runScaffold(dir, { sandboxProvider: noSandboxProvider });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain(
+        'import { noSandbox } from "@yogioo/sandcastle/sandboxes/no-sandbox"',
+      );
+      expect(mainTs).toContain("sandbox: noSandbox()");
+      expect(mainTs).not.toContain("docker");
+    });
+
+    it("useWorktree false rewrites simple-loop to head mode without copyToWorktree", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        useWorktree: false,
+      });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain('branchStrategy: { type: "head" }');
+      expect(mainTs).not.toContain("merge-to-head");
+      expect(mainTs).not.toContain("copyToWorktree");
+    });
+
+    it("rejects no-worktree for templates that require worktrees", async () => {
+      expect(
+        validateScaffoldOptions({
+          agent: claudeCodeAgent,
+          model: "claude-opus-4-8",
+          templateName: "parallel-planner",
+          useWorktree: false,
+        }),
+      ).toContain("requires git worktrees");
+
+      const dir = await makeDir();
+      await expect(
+        runScaffold(dir, {
+          templateName: "sequential-reviewer",
+          useWorktree: false,
+        }),
+      ).rejects.toThrow("requires git worktrees");
+    });
+
+    it("no-worktree next steps omit copyToWorktree guidance", () => {
+      const lines = getNextStepsLines(
+        "simple-loop",
+        "main.mts",
+        getIssueTracker("github-issues")!,
+        claudeCodeAgent,
+        "npm",
+        getSandboxProvider("docker")!,
+        false,
+      ).join("\n");
+      expect(lines).not.toContain("copyToWorktree");
+      expect(lines).toContain("Head mode");
+    });
+
+    it("no-sandbox next steps mention host execution", () => {
+      const lines = getNextStepsLines(
+        "blank",
+        "main.mts",
+        getIssueTracker("github-issues")!,
+        claudeCodeAgent,
+        "npm",
+        getSandboxProvider("no-sandbox")!,
+        true,
+      ).join("\n");
+      expect(lines).toContain("host");
+      expect(lines).not.toContain("copyToWorktree");
     });
   });
 });

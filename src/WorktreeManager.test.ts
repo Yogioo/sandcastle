@@ -169,6 +169,27 @@ describe("WorktreeManager.create", () => {
     expect(s.isDirectory()).toBe(true);
   });
 
+  it("creates and removes worktrees in an external state directory", async () => {
+    const repoDir = await setupRepo();
+    const stateDir = join(repoDir, "external-state", ".sandcastle");
+    const worktreesDir = join(stateDir, "worktrees");
+    const { path } = await run(
+      create(repoDir, {
+        branch: "external-state-branch",
+        worktreesDir,
+      }),
+    );
+
+    expect(path).toContain(join("external-state", ".sandcastle", "worktrees"));
+    expect(await stat(path)).toMatchObject({ isDirectory: expect.any(Function) });
+    expect(await readdir(join(repoDir, ".sandcastle")).catch(() => [])).toEqual(
+      [],
+    );
+
+    await run(remove(path, repoDir));
+    await expect(stat(path)).rejects.toThrow();
+  });
+
   it("returns the branch name", async () => {
     const repoDir = await setupRepo();
     const { branch } = await run(create(repoDir));

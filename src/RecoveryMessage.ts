@@ -1,3 +1,5 @@
+import { isAbsolute } from "node:path";
+
 export type FailedStep = "commits" | "diff" | "untracked";
 
 export interface RecoveryInput {
@@ -19,7 +21,8 @@ export const buildRecoveryMessage = (input: RecoveryInput): string => {
 
   // When --branch is set, commands run inside .sandcastle/worktree,
   // so patch paths need ../../ prefix to reach repo root
-  const cmdPatchDir = branch ? `../../${patchDir}` : patchDir;
+  const cmdPatchDir =
+    branch && !isAbsolute(patchDir) ? `../../${patchDir}` : patchDir;
 
   // Determine the step number for the failed step
   const steps: { key: FailedStep; label: string; has: boolean }[] = [];

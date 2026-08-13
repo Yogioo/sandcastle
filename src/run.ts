@@ -34,6 +34,7 @@ import {
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
 import { generateTempBranchName, getCurrentBranch } from "./WorktreeManager.js";
+import { resolveRuntimeStateDir } from "./StateDir.js";
 import {
   type PromptArgs,
   substitutePromptArgs,
@@ -335,15 +336,23 @@ export interface RunOptions<A extends AgentProvider = AgentProvider> {
   /** Sandbox provider (e.g. docker({ imageName: "sandcastle:myrepo" })). */
   readonly sandbox: SandboxProvider;
   /**
-   * Host repo directory. Replaces `process.cwd()` as the anchor for
-   * `.sandcastle/worktrees/`, `.sandcastle/.env`, `.sandcastle/logs/`,
-   * `.sandcastle/patches/`, and git operations.
+   * Host repo directory. Replaces `process.cwd()` as the anchor for Git
+   * operations. Sandcastle-owned state uses `stateDir`.
    *
    * - Relative paths are resolved against `process.cwd()`.
    * - Absolute paths are used as-is.
    * - Defaults to `process.cwd()` when omitted.
    */
   readonly cwd?: string;
+  /**
+   * External directory for all Sandcastle-owned state: `.env`, logs, worktrees,
+   * and patches. The target repository remains `cwd` and continues to own all
+   * Git operations. Defaults to the per-user project cache used by `init`.
+   *
+   * This is useful when an external workflow should operate directly on a
+   * repository, such as a Unity project, without adding Sandcastle files to it.
+   */
+  readonly stateDir?: string;
   /** Inline prompt string (mutually exclusive with promptFile) */
   readonly prompt?: string;
   /**
@@ -582,6 +591,7 @@ export async function run(
   const hostRepoDir = await Effect.runPromise(
     resolveCwd(options.cwd).pipe(Effect.provide(NodeContext.layer)),
   );
+  const stateDir = resolveRuntimeStateDir(hostRepoDir, options.stateDir);
 
   // Validate: resumeSession file must exist on the host
   if (options.resumeSession) {
@@ -617,7 +627,7 @@ export async function run(
 
   // Resolve env vars and merge with provider env
   const resolvedEnv = await Effect.runPromise(
-    resolveEnv(hostRepoDir).pipe(Effect.provide(NodeContext.layer)),
+    resolveEnv(hostRepoDir, stateDir).pipe(Effect.provide(NodeContext.layer)),
   );
   const env = mergeProviderEnv({
     resolvedEnv,
@@ -647,8 +657,7 @@ export async function run(
   const resolvedLogging: LoggingOption = options.logging ?? {
     type: "file",
     path: join(
-      hostRepoDir,
-      ".sandcastle",
+      stateDir,
       "logs",
       buildLogFilename(resolvedBranch, targetBranch, options.name),
     ),
@@ -675,6 +684,7 @@ export async function run(
       Layer.succeed(SandboxConfig, {
         env,
         hostRepoDir,
+        stateDir,
         copyToWorktree: options.copyToWorktree,
         name: options.name,
         sandboxProvider: options.sandbox,

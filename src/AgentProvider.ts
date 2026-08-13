@@ -40,6 +40,9 @@ export type ParsedStreamEvent =
 
 const shellEscape = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
 
+const shellEscapeModel = (model: string): string =>
+  /^[A-Za-z0-9._-]+$/.test(model) ? model : shellEscape(model);
+
 /** Maps allowlisted tool names to the input field containing the display arg */
 const TOOL_ARG_FIELDS: Record<string, string> = {
   Bash: "command",
@@ -806,9 +809,11 @@ export const codex = (
     } else {
       base = "codex exec";
     }
-    const stdinArg = resumeSession ? " -" : "";
+    // Codex 0.145 on Windows exits after reading stdin unless the explicit
+    // stdin marker is present, including for a fresh session.
+    const stdinArg = " -";
     return {
-      command: `${base} --json${approvalsFlags} -m ${shellEscape(model)}${effortFlag}${stdinArg}`,
+      command: `${base} --json${approvalsFlags} -m ${shellEscapeModel(model)}${effortFlag}${stdinArg}`,
       stdin: prompt,
     };
   },

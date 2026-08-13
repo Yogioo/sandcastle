@@ -6,108 +6,192 @@
   </picture>
 </div>
 
-## What Is Sandcastle?
+## Sandcastle 是什么？
 
-A TypeScript library for orchestrating AI coding agents in isolated sandboxes:
+一个在隔离沙箱中编排 AI 编程代理的 TypeScript 库：
 
-1. You invoke agents with a single `sandcastle.run()`.
-2. Sandcastle handles sandboxing the agent with a configurable branch strategy.
-3. The commits made on the branches get merged back.
+1. 通过一次 `sandcastle.run()` 调用代理。
+2. Sandcastle 负责将代理放入沙箱，并应用可配置的分支策略。
+3. 分支上的提交会被合并回主仓库。
 
-Sandcastle is provider-agnostic — it ships with built-in providers for Docker, Podman, and Vercel, and you can create your own. Great for parallelizing multiple AFK agents, creating review pipelines, or even just orchestrating your own agents.
+Sandcastle 与具体提供商无关——内置 Docker、Podman、Vercel 等提供商，你也可以自行实现。适合并行运行多个无人值守（AFK）代理、搭建审查流水线，或编排你自己的代理工作流。
 
-## Prerequisites
+## 前置条件
 
 - [Git](https://git-scm.com/)
-- A sandbox provider — Sandcastle needs an isolated environment to run agents in. Built-in options:
-  - [Docker Desktop](https://www.docker.com/) — most common for local development
-  - [Podman](https://podman.io/) — rootless alternative to Docker
-  - [Vercel](https://vercel.com/) — cloud-based Firecracker microVMs via `@vercel/sandbox`
-  - Or [create your own](#custom-sandbox-providers) using `createBindMountSandboxProvider` or `createIsolatedSandboxProvider`
+- 沙箱提供商——Sandcastle 需要隔离环境来运行代理。内置选项：
+  - [Docker Desktop](https://www.docker.com/)——本地开发最常用
+  - [Podman](https://podman.io/)——Docker 的无 root 替代方案
+  - [Vercel](https://vercel.com/)——通过 `@vercel/sandbox` 使用云端 Firecracker 微虚拟机
+  - 或使用 `createBindMountSandboxProvider` / `createIsolatedSandboxProvider` [自行创建](#自定义沙箱提供商)
 
-## Quick start
+## 快速开始
 
-1. Install the package:
-
-```bash
-npm install --save-dev @ai-hero/sandcastle
-```
-
-2. Run `npx @ai-hero/sandcastle init`. This scaffolds a `.sandcastle` directory with all the files needed.
+1. 安装 CLI：
 
 ```bash
-npx @ai-hero/sandcastle init
+npm install -g @yogioo/sandcastle
 ```
 
-3. Edit `.sandcastle/.env` and fill in your default values for `CLAUDE_CODE_OAUTH_TOKEN` (run `claude setup-token` on your host to get one). To use an Anthropic API key instead, uncomment and fill in `ANTHROPIC_API_KEY`.
+如果不想全局安装，也可以在下面的命令中使用 `npx @yogioo/sandcastle` 作为后备调用方式。
+
+2. 在仓库中运行 `sandcastle init [path]`。工作流文件默认生成到用户缓存目录，而不是开发仓库：
 
 ```bash
-cp .sandcastle/.env.example .sandcastle/.env
+sandcastle init
 ```
 
-4. Run the `.sandcastle/main.ts` (or `main.mts`) file with `npx tsx`
+也可以初始化另一个仓库：`sandcastle init C:/projects/another-repo`。在 Windows 上，默认位置类似 `%LOCALAPPDATA%\Sandcastle\projects\<项目标识>\.sandcastle\`。`init` 会登记项目清单并输出实际状态目录和入口文件；若需要自定义位置，传入 `--state-dir`。
+
+3. 编辑输出路径下的 `.env`，填入 `CLAUDE_CODE_OAUTH_TOKEN`（在宿主机运行 `claude setup-token` 获取）。若使用 Anthropic API Key，取消注释并填写 `ANTHROPIC_API_KEY`。
 
 ```bash
-npx tsx .sandcastle/main.ts
+cp <init 输出的状态目录>/.env.example <init 输出的状态目录>/.env
 ```
+
+4. 运行 CLI。它会使用当前仓库的已登记项目；若当前目录不是已登记项目，则显示项目选择列表：
+
+```bash
+sandcastle
+```
+
+也可以直接指定仓库：`sandcastle C:/projects/another-repo`。不需要手动输入生成的入口文件路径；`npx @yogioo/sandcastle` 仍可作为未安装全局 CLI 时的后备方式。
 
 ```typescript
-// 3. Run the agent via the JS API
-import { run, claudeCode } from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+// 通过 JS API 运行代理
+import { run, claudeCode } from "@yogioo/sandcastle";
+import { docker } from "@yogioo/sandcastle/sandboxes/docker";
 
 await run({
   agent: claudeCode("claude-opus-4-8"),
-  sandbox: docker(), // or podman(), vercel(), or your own provider
-  promptFile: ".sandcastle/prompt.md",
+  sandbox: docker(), // 或 podman()、vercel()、自定义提供商
+  promptFile:
+    "C:/Users/me/AppData/Local/Sandcastle/projects/my-project/.sandcastle/prompt.md",
 });
 ```
 
-## Sandbox Providers
+## 在其他仓库中本地开发
 
-Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbox` option on `run()`, `interactive()`, and `createSandbox()` accepts any provider, including `noSandbox()` — opt in to running the agent directly on the host when container isolation is undesired. Built-in providers:
+当你在本仓库开发 Sandcastle，并希望在另一个 Git 仓库中本地试用时，使用此工作流。它直接在宿主机上运行 Codex，同时为代理分配独立的 Git worktree，无需 Docker。
 
-| Provider   | Import path                                | Type       | Accepted by                                 |
-| ---------- | ------------------------------------------ | ---------- | ------------------------------------------- |
-| Docker     | `@ai-hero/sandcastle/sandboxes/docker`     | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
-| Podman     | `@ai-hero/sandcastle/sandboxes/podman`     | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
-| Vercel     | `@ai-hero/sandcastle/sandboxes/vercel`     | Isolated   | `run()`, `createSandbox()`, `interactive()` |
-| No-sandbox | `@ai-hero/sandcastle/sandboxes/no-sandbox` | None       | `run()`, `createSandbox()`, `interactive()` |
+前置条件：
 
-Worktree methods (`wt.run()`, `wt.interactive()`, `wt.createSandbox()`) accept the same providers as their top-level counterparts. `wt.interactive()` defaults to `noSandbox()` when no sandbox is specified.
+- Node.js 与 npm
+- Git
+- 已通过 `codex login` 认证的 [Codex CLI](https://developers.openai.com/codex/cli/)，或配置 `OPENAI_API_KEY`
+
+首先，构建并 link 本仓库：
+
+```powershell
+cd C:\projects\sandcastle
+npm run build
+npm link
+```
+
+然后在目标仓库中 link：
+
+```powershell
+cd C:\projects\your-project
+npm link @yogioo/sandcastle
+New-Item -ItemType Directory -Force .sandcastle
+@"
+OPENAI_API_KEY=
+"@ | Set-Content .sandcastle\.env
+```
+
+若不使用 `codex login`，请在 `.sandcastle/.env` 中设置 `OPENAI_API_KEY`。
+创建 `.sandcastle/local-task.ts`，写入项目特定任务：
 
 ```typescript
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
-import { podman } from "@ai-hero/sandcastle/sandboxes/podman";
-import { vercel } from "@ai-hero/sandcastle/sandboxes/vercel";
-import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
+import { codex, createWorktree } from "@yogioo/sandcastle";
+import { noSandbox } from "@yogioo/sandcastle/sandboxes/no-sandbox";
 
-// Docker, Podman, and Vercel are interchangeable in run() and createSandbox():
+await using worktree = await createWorktree({
+  branchStrategy: { type: "branch", branch: "agent/local-task" },
+});
+
+const result = await worktree.run({
+  agent: codex("gpt-5.6-terra"),
+  sandbox: noSandbox(),
+  prompt: "描述实现任务及所需验证步骤。",
+});
+
+console.log(result.commits);
+```
+
+从目标仓库根目录运行，Sandcastle 会把 `.env`、日志、worktree 和 patches 放入 `stateDir`，而 Git 操作仍针对 `cwd`：
+
+```powershell
+npx tsx --env-file=C:/tools/unity-agent/MyUnityGame/.env C:/tools/unity-agent/MyUnityGame/main.mts
+```
+
+`noSandbox()` 表示代理直接在宿主机上执行命令。Git worktree 隔离的是分支与工作目录，不隔离宿主机凭据、网络访问或已安装工具。请使用专用分支，合并前审查提交。
+
+### 外部状态目录
+
+当外部工作流需要直接操作另一个仓库、且不想在其中添加 Sandcastle 文件时，使用 `stateDir`：
+
+```typescript
+import { codex, run } from "@yogioo/sandcastle";
+import { noSandbox } from "@yogioo/sandcastle/sandboxes/no-sandbox";
+
+await run({
+  cwd: "C:/projects/MyUnityGame",
+  stateDir: "C:/tools/unity-agent/MyUnityGame",
+  promptFile: "C:/tools/unity-agent/prompts/implement.md",
+  agent: codex("gpt-5.6-terra"),
+  sandbox: noSandbox(),
+  branchStrategy: { type: "head" },
+  maxIterations: 3,
+});
+```
+
+`cwd` 仍是 Git 操作与代理命令的目标仓库。`stateDir` 是完整的 Sandcastle 状态根，包含 `.env`、默认日志、外部 worktree 和 patches。是否提交仍由提示词及外围 `main.mts` 工作流控制；Sandcastle 既不强制也不阻止提交。
+
+## 沙箱提供商
+
+Sandcastle 通过 `SandboxProvider` 创建隔离环境。`run()`、`interactive()`、`createSandbox()` 的 `sandbox` 选项可接受任意提供商，包括 `noSandbox()`——在不需要容器隔离时，可选择在宿主机上直接运行代理。内置提供商：
+
+| 提供商 | 导入路径                                  | 类型     | 可用于                                      |
+| ------ | ----------------------------------------- | -------- | ------------------------------------------- |
+| Docker | `@yogioo/sandcastle/sandboxes/docker`     | 绑定挂载 | `run()`、`createSandbox()`、`interactive()` |
+| Podman | `@yogioo/sandcastle/sandboxes/podman`     | 绑定挂载 | `run()`、`createSandbox()`、`interactive()` |
+| Vercel | `@yogioo/sandcastle/sandboxes/vercel`     | 隔离     | `run()`、`createSandbox()`、`interactive()` |
+| 无沙箱 | `@yogioo/sandcastle/sandboxes/no-sandbox` | 无       | `run()`、`createSandbox()`、`interactive()` |
+
+Worktree 方法（`wt.run()`、`wt.interactive()`、`wt.createSandbox()`）接受与顶层对应方法相同的提供商。未指定沙箱时，`wt.interactive()` 默认为 `noSandbox()`。
+
+```typescript
+import { docker } from "@yogioo/sandcastle/sandboxes/docker";
+import { podman } from "@yogioo/sandcastle/sandboxes/podman";
+import { vercel } from "@yogioo/sandcastle/sandboxes/vercel";
+import { noSandbox } from "@yogioo/sandcastle/sandboxes/no-sandbox";
+
+// Docker、Podman、Vercel 在 run() 与 createSandbox() 中可互换：
 await run({
   agent: claudeCode("claude-opus-4-8"),
   sandbox: docker(),
   prompt: "...",
 });
 
-// No-sandbox runs the agent directly on the host — accepted by run(),
-// createSandbox(), and interactive(). Skips container isolation entirely:
+// noSandbox() 在宿主机直接运行代理，跳过容器隔离：
 await interactive({
   agent: claudeCode("claude-opus-4-8"),
   sandbox: noSandbox(),
-  prompt: "...", // optional — omit to launch the TUI with no initial prompt
-  cwd: "/path/to/other-repo", // optional — defaults to process.cwd()
+  prompt: "...", // 可选——省略则以无初始提示启动 TUI
+  cwd: "/path/to/other-repo", // 可选——默认 process.cwd()
 });
 ```
 
-You can also [create your own provider](#custom-sandbox-providers) using `createBindMountSandboxProvider` or `createIsolatedSandboxProvider`.
+也可使用 `createBindMountSandboxProvider` 或 `createIsolatedSandboxProvider` [创建自定义提供商](#自定义沙箱提供商)。
 
 ## API
 
-Sandcastle exports a programmatic `run()` function for use in scripts, CI pipelines, or custom tooling. The examples below use `docker()`, but any `SandboxProvider` works in its place.
+Sandcastle 导出程序化 `run()` 函数，供脚本、CI 流水线或自定义工具使用。以下示例使用 `docker()`，任意 `SandboxProvider` 均可替换。
 
 ```typescript
-import { run, claudeCode } from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { run, claudeCode } from "@yogioo/sandcastle";
+import { docker } from "@yogioo/sandcastle/sandboxes/docker";
 
 const result = await run({
   agent: claudeCode("claude-opus-4-8"),
@@ -115,81 +199,84 @@ const result = await run({
   promptFile: ".sandcastle/prompt.md",
 });
 
-console.log(result.iterations.length); // number of iterations executed
-console.log(result.iterations); // per-iteration results with optional sessionId
-console.log(result.commits); // array of { sha } for commits created
-console.log(result.branch); // target branch name
+console.log(result.iterations.length); // 已执行迭代次数
+console.log(result.iterations); // 每轮迭代结果（含可选 sessionId）
+console.log(result.commits); // 创建的提交 { sha } 数组
+console.log(result.branch); // 目标分支名
 ```
 
-### All options
+### 全部选项
 
 ```typescript
-import { run, claudeCode } from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { run, claudeCode } from "@yogioo/sandcastle";
+import { docker } from "@yogioo/sandcastle/sandboxes/docker";
 
 const result = await run({
-  // Agent provider — required. Pass a model string to claudeCode().
-  // Optional second arg for provider-specific options like effort level.
+  // 代理提供商——必填。向 claudeCode() 传入模型字符串。
+  // 可选第二参数为提供商专属选项（如 effort 级别）。
   agent: claudeCode("claude-opus-4-8", { effort: "high" }),
 
-  // Sandbox provider — required. Any SandboxProvider works (docker, podman, vercel, or custom).
-  // Provider-specific config (like imageName, mounts) lives inside the provider factory call.
+  // 沙箱提供商——必填。任意 SandboxProvider（docker、podman、vercel 或自定义）。
+  // 提供商专属配置（如 imageName、mounts）写在工厂函数调用内。
   sandbox: docker({
     imageName: "sandcastle:local",
-    // Optional: override the UID/GID used for --user flag (defaults to host UID/GID).
-    // Must match the UID baked into the image. Pre-flight check catches mismatches.
+    // 可选：覆盖 --user 使用的 UID/GID（默认宿主机 UID/GID）。
+    // 须与镜像内 UID 一致。预检会捕获不匹配。
     // containerUid: 1000,
     // containerGid: 1000,
-    // Optional: mount host directories into the sandbox (e.g. package manager caches)
-    // hostPath supports absolute, tilde-expanded (~), and relative paths (resolved from cwd).
-    // sandboxPath supports absolute and relative paths (resolved from the sandbox repo directory).
+    // 可选：将宿主机目录挂载进沙箱（如包管理器缓存）
+    // hostPath 支持绝对路径、~ 展开及相对路径（相对 cwd 解析）。
+    // sandboxPath 支持绝对与相对路径（相对沙箱仓库目录解析）。
     mounts: [
       { hostPath: "~/.npm", sandboxPath: "/home/agent/.npm", readonly: true },
-      { hostPath: "data", sandboxPath: "data" }, // mounts <cwd>/data → <sandbox-repo>/data
+      { hostPath: "data", sandboxPath: "data" }, // 挂载 <cwd>/data → <sandbox-repo>/data
     ],
-    // Optional: SELinux volume label — "z" (default, shared), "Z" (private), or false (none).
-    // No-op on non-SELinux systems (Docker Desktop on macOS/Windows, Linux without SELinux).
+    // 可选：SELinux 卷标签——"z"（默认，共享）、"Z"（私有）或 false（无）。
+    // 非 SELinux 系统上无效（macOS/Windows 上的 Docker Desktop、无 SELinux 的 Linux）。
     selinuxLabel: "z",
-    // Optional: provider-level env vars merged at launch time
+    // 可选：启动时合并的提供商级环境变量
     env: { DOCKER_SPECIFIC: "value" },
-    // Optional: attach container to Docker network(s) — string or string[]
+    // 可选：将容器接入 Docker 网络——字符串或字符串数组
     network: "my-network",
-    // Optional: add the container user to supplementary groups via --group-add.
-    // Accepts group names or numeric GIDs (e.g. for a bind-mounted Docker socket).
+    // 可选：通过 --group-add 将容器用户加入附加组。
+    // 接受组名或数字 GID（如绑定挂载的 Docker socket）。
     groups: ["docker", 999],
-    // Optional: expose host devices via --device. Each entry is a full device
-    // spec in host[:container[:permissions]] form (e.g. "/dev/kvm").
+    // 可选：通过 --device 暴露宿主机设备。每项为 host[:container[:permissions]] 形式（如 "/dev/kvm"）。
     devices: ["/dev/kvm"],
-    // Optional: limit CPU resources via --cpus. Fractional values allowed (e.g. 1.5).
+    // 可选：通过 --cpus 限制 CPU。允许小数（如 1.5）。
     // cpus: 2,
   }),
 
-  // Host repo directory — replaces process.cwd() as the anchor for
-  // .sandcastle/ artifacts (worktrees, logs, env, patches) and git operations.
-  // Relative paths resolve against process.cwd(). Defaults to process.cwd().
+  // 宿主机仓库目录——替代 process.cwd()，作为
+  // .sandcastle/ 产物（worktree、日志、env、补丁）与 git 操作的锚点。
+  // 相对路径相对 process.cwd() 解析。默认 process.cwd()。
   cwd: "../other-repo",
 
-  // Branch strategy — controls how the agent's changes relate to branches.
-  // Defaults to { type: "head" } for bind-mount and { type: "merge-to-head" } for isolated providers.
+  // Sandcastle 状态根：.env、日志、worktree 与 patches。
+  // 默认使用用户缓存目录；可通过 stateDir 显式指定位置。
+  stateDir: "../unity-agent-state",
+
+  // 分支策略——控制代理改动与分支的关系。
+  // 绑定挂载提供商默认 { type: "head" }，隔离提供商默认 { type: "merge-to-head" }。
   branchStrategy: { type: "branch", branch: "agent/fix-42" },
 
-  // Prompt source — provide one of these, not both.
-  // Note: promptFile resolves against process.cwd(), NOT cwd.
-  promptFile: ".sandcastle/prompt.md", // path to a prompt file
-  // prompt: "Fix issue #42 in this repo", // OR an inline prompt string
+  // 提示词来源——二选一，不可同时提供。
+  // 注意：promptFile 相对 process.cwd() 解析，而非 cwd。
+  promptFile: ".sandcastle/prompt.md", // 提示词文件路径
+  // prompt: "修复本仓库 issue #42", // 或内联提示词字符串
 
-  // Values substituted for {{KEY}} placeholders in the prompt.
+  // 替换提示词中 {{KEY}} 占位符的值。
   promptArgs: {
     ISSUE_NUMBER: "42",
   },
 
-  // Maximum number of agent iterations to run before stopping. Default: 1
+  // 停止前的最大代理迭代次数。默认：1
   maxIterations: 5,
 
-  // Display name for this run, shown as a prefix in log output.
+  // 本次运行的显示名，作为日志输出前缀。
   name: "fix-issue-42",
 
-  // Lifecycle hooks grouped by where they run: host or sandbox.
+  // 按运行位置分组的生命周期钩子：host 或 sandbox。
   hooks: {
     host: {
       onWorktreeReady: [{ command: "cp .env.example .env" }],
@@ -200,75 +287,70 @@ const result = await run({
     },
   },
 
-  // Host-relative file paths to copy into the sandbox before the container starts.
-  // Not supported with branchStrategy: { type: "head" }.
+  // 容器启动前复制进沙箱的、相对宿主机路径的文件。
+  // 不支持 branchStrategy: { type: "head" }。
   copyToWorktree: [".env"],
 
-  // Override default timeouts for built-in lifecycle steps.
-  // Unset keys keep their defaults.
+  // 覆盖内置生命周期步骤的默认超时。未设置的键保留默认值。
   timeouts: {
-    copyToWorktreeMs: 120_000, // default: 60_000
-    gitSetupMs: 30_000, // default: 10_000
-    commitCollectionMs: 60_000, // default: 30_000
-    mergeToHostMs: 60_000, // default: 30_000
+    copyToWorktreeMs: 120_000, // 默认：60_000
+    gitSetupMs: 30_000, // 默认：10_000
+    commitCollectionMs: 60_000, // 默认：30_000
+    mergeToHostMs: 60_000, // 默认：30_000
   },
 
-  // How to record progress. Default: write to a file under .sandcastle/logs/
+  // 如何记录进度。默认：写入 .sandcastle/logs/ 下的文件
   logging: {
     type: "file",
     path: ".sandcastle/logs/my-run.log",
-    // Optional: forward the agent's output stream to your own observability system.
-    // Fires for each text chunk, tool call, and raw stdout line the agent
-    // produces. Errors thrown by the callback are swallowed so a broken
-    // forwarder cannot kill the run.
+    // 可选：将代理输出流转发到自有可观测系统。
+    // 每个文本块、工具调用及原始 stdout 行都会触发。
+    // 回调抛错会被吞掉，避免转发器故障导致运行失败。
     onAgentStreamEvent: (event) => {
-      // event is { type: "text" | "toolCall" | "raw", iteration, timestamp, ... }
+      // event 为 { type: "text" | "toolCall" | "raw", iteration, timestamp, ... }
       myLogger.info(event);
     },
-    // Optional: append every raw stdout line the agent emits to the same
-    // log file, interleaved with the human-readable output. Includes lines
-    // the provider's stream parser would otherwise drop. Intended for
-    // debugging stuck or unexpected agent behaviour.
+    // 可选：将代理发出的每条原始 stdout 行追加到同一日志文件，
+    // 与人类可读输出交错。包含提供商流解析器会丢弃的行。用于调试卡住或异常行为。
     verbose: true,
   },
-  // logging: { type: "stdout", verbose: true }, // OR terminal mode (verbose: raw lines to stdout)
+  // logging: { type: "stdout", verbose: true }, // 或终端模式（verbose：原始行输出到 stdout）
 
-  // String (or array of strings) the agent emits to end the iteration loop early.
-  // Default: "<promise>COMPLETE</promise>"
+  // 代理发出后提前结束迭代循环的字符串（或字符串数组）。
+  // 默认："<promise>COMPLETE</promise>"
   completionSignal: "<promise>COMPLETE</promise>",
 
-  // Idle timeout in seconds — resets whenever the agent produces output. Default: 600 (10 minutes)
+  // 空闲超时（秒）——代理每次产生输出时重置。默认：600（10 分钟）
   idleTimeoutSeconds: 600,
 
-  // Grace window in seconds after the agent emits a completion signal but
-  // before its process has exited (a "hanging process" — typically a spawned
-  // `gh`/git child or MCP server keeping stdout open). Resets on every
-  // subsequent output line so trailing data is still captured. Default: 60
+  // 代理已发出完成信号但进程尚未退出时的宽限窗口（秒）（“挂起进程”——
+  // 通常是子进程 gh/git 或 MCP 服务器保持 stdout 打开）。每次后续输出行会重置，
+  // 以便仍捕获尾部数据。默认：60
   completionTimeoutSeconds: 60,
 
-  // Structured output — extract a typed payload from the agent's stdout.
-  // Requires maxIterations === 1 and the tag must appear in the prompt.
+  // 结构化输出——从代理 stdout 提取类型化负载。
+  // 要求 maxIterations === 1，且提示词须包含配置的开标签。
   // output: Output.object({ tag: "result", schema: z.object({ answer: z.number() }) }),
   // output: Output.string({ tag: "summary" }),
 });
 
-console.log(result.iterations.length); // number of iterations executed
-console.log(result.completionSignal); // matched signal string, or undefined if none fired
-console.log(result.commits); // array of { sha } for commits created
-console.log(result.branch); // target branch name
+console.log(result.iterations.length); // 已执行迭代次数
+console.log(result.completionSignal); // 匹配到的信号字符串，未触发则为 undefined
+console.log(result.commits); // 创建的提交 { sha } 数组
+console.log(result.branch); // 目标分支名
 ```
 
-### `createSandbox()` — reusable sandbox
+### `createSandbox()`——可复用沙箱
 
-Use `createSandbox()` when you need to run multiple agents (or multiple rounds of the same agent) inside a single sandbox. It creates the sandbox once, and you call `sandbox.run()` as many times as you need. This avoids repeated container startup costs and keeps all runs on the same branch.
+需要在单个沙箱内运行多个代理（或同一代理多轮）时使用 `createSandbox()`。沙箱只创建一次，可多次调用 `sandbox.run()`，避免重复启动容器，且所有运行在同一分支上。
 
-Use `run()` instead when you only need a single one-shot invocation — it handles sandbox lifecycle automatically.
+若只需单次调用，用 `run()` 即可——它会自动管理沙箱生命周期。
 
-#### Basic single-run usage
+#### 基本单次用法
 
 ```typescript
-import { createSandbox, claudeCode } from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { createSandbox, claudeCode } from "@yogioo/sandcastle";
+import { docker } from "@yogioo/sandcastle/sandboxes/docker";
 
 await using sandbox = await createSandbox({
   branch: "agent/fix-42",
@@ -277,17 +359,17 @@ await using sandbox = await createSandbox({
 
 const result = await sandbox.run({
   agent: claudeCode("claude-opus-4-8"),
-  prompt: "Fix issue #42 in this repo.",
+  prompt: "修复本仓库 issue #42。",
 });
 
 console.log(result.commits); // [{ sha: "abc123" }]
 ```
 
-#### Multi-run implement-then-review
+#### 多轮：实现后审查
 
 ```typescript
-import { createSandbox, claudeCode } from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { createSandbox, claudeCode } from "@yogioo/sandcastle";
+import { docker } from "@yogioo/sandcastle/sandboxes/docker";
 
 await using sandbox = await createSandbox({
   branch: "agent/fix-42",
@@ -295,23 +377,23 @@ await using sandbox = await createSandbox({
   hooks: { sandbox: { onSandboxReady: [{ command: "npm install" }] } },
 });
 
-// Step 1: implement
+// 步骤 1：实现
 const implResult = await sandbox.run({
   agent: claudeCode("claude-opus-4-8"),
   promptFile: ".sandcastle/implement.md",
   maxIterations: 5,
 });
 
-// Step 2: review on the same branch, same container
+// 步骤 2：同一分支、同一容器内审查
 const reviewResult = await sandbox.run({
   agent: claudeCode("claude-sonnet-4-6"),
-  prompt: "Review the changes and fix any issues.",
+  prompt: "审查改动并修复问题。",
 });
 ```
 
-Commits from all `run()` calls accumulate on the same branch. The sandbox container stays alive between runs, so installed dependencies and build artifacts persist.
+所有 `run()` 的提交会累积在同一分支。容器在运行间保持存活，依赖与构建产物得以保留。
 
-`sandbox.exec()` lets the harness run shell commands directly in the same warm sandbox — handy for gating an implement step on a quick verification before kicking off the review:
+`sandbox.exec()` 允许在温沙箱中直接执行 shell 命令——适合在启动审查前用快速验证门禁实现步骤：
 
 ```typescript
 await using sandbox = await createSandbox({
@@ -326,280 +408,282 @@ await sandbox.run({
   maxIterations: 5,
 });
 
-// Verify before review — non-zero exitCode is returned, not thrown.
+// 审查前验证——非零 exitCode 会返回，不会抛出。
 const tests = await sandbox.exec("npm test");
 if (tests.exitCode !== 0) {
-  throw new Error(`Tests failed:\n${tests.stdout}\n${tests.stderr}`);
+  throw new Error(`测试失败:\n${tests.stdout}\n${tests.stderr}`);
 }
 
 await sandbox.run({
   agent: claudeCode("claude-sonnet-4-6"),
-  prompt: "Review the changes and fix any issues.",
+  prompt: "审查改动并修复问题。",
 });
 ```
 
-`cwd` defaults to the sandbox repo path, matching `interactive()`. Pass `cwd` to override.
+`cwd` 默认为沙箱仓库路径，与 `interactive()` 一致。可传 `cwd` 覆盖。
 
-#### Automatic cleanup with `await using`
+#### 使用 `await using` 自动清理
 
-`await using` calls `sandbox.close()` automatically when the block exits. If the sandbox has uncommitted changes, the worktree is preserved on disk; if clean, both container and worktree are removed.
+`await using` 在块退出时自动调用 `sandbox.close()`。若有未提交改动，worktree 会保留在磁盘；若干净，则同时移除容器与 worktree。
 
-#### Manual `close()` with `CloseResult`
+#### 手动 `close()` 与 `CloseResult`
 
 ```typescript
 const sandbox = await createSandbox({
   branch: "agent/fix-42",
   sandbox: docker(),
 });
-// ... run agents ...
+// ... 运行代理 ...
 const closeResult = await sandbox.close();
 if (closeResult.preservedWorktreePath) {
-  console.log(`Worktree preserved at ${closeResult.preservedWorktreePath}`);
+  console.log(`Worktree 已保留于 ${closeResult.preservedWorktreePath}`);
 }
 ```
 
 #### `CreateSandboxOptions`
 
-| Option           | Type            | Default         | Description                                                                                                         |
-| ---------------- | --------------- | --------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `branch`         | string          | —               | **Required.** Explicit branch for the sandbox                                                                       |
-| `sandbox`        | SandboxProvider | —               | **Required.** Sandbox provider (e.g. `docker()`, `podman()`)                                                        |
-| `cwd`            | string          | `process.cwd()` | Host repo directory — relative paths resolve against `process.cwd()`                                                |
-| `hooks`          | SandboxHooks    | —               | Lifecycle hooks (`host.*`, `sandbox.*`) — run once at creation time                                                 |
-| `copyToWorktree` | string[]        | —               | Host-relative file paths to copy into the sandbox at creation time                                                  |
-| `timeouts`       | Timeouts        | —               | Override built-in lifecycle step timeouts (`copyToWorktreeMs`, `gitSetupMs`, `commitCollectionMs`, `mergeToHostMs`) |
+| 选项             | 类型            | 默认值              | 说明                                                        |
+| ---------------- | --------------- | ------------------- | ----------------------------------------------------------- |
+| `branch`         | string          | —                   | **必填。** 沙箱使用的显式分支                               |
+| `sandbox`        | SandboxProvider | —                   | **必填。** 沙箱提供商（如 `docker()`、`podman()`）          |
+| `cwd`            | string          | `process.cwd()`     | 宿主机仓库目录——相对路径相对 `process.cwd()` 解析           |
+| `stateDir`       | string          | 用户缓存目录       | Sandcastle 状态根；可外置 `.env`、日志、worktree 与 patches |
+| `hooks`          | SandboxHooks    | —                   | 生命周期钩子（`host.*`、`sandbox.*`）——创建时执行一次       |
+| `copyToWorktree` | string[]        | —                   | 创建时复制进沙箱的、相对宿主机的文件路径                    |
+| `timeouts`       | Timeouts        | —                   | 覆盖内置生命周期超时（`copyToWorktreeMs`、`gitSetupMs` 等） |
 
 #### `Sandbox`
 
-| Property / Method       | Type                                                                     | Description                                                                                                               |
-| ----------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| `branch`                | string                                                                   | The branch the sandbox is on                                                                                              |
-| `worktreePath`          | string                                                                   | Host path to the worktree                                                                                                 |
-| `run(options)`          | `(SandboxRunOptions) => Promise<SandboxRunResult>`                       | Invoke an agent inside the existing sandbox                                                                               |
-| `interactive(options)`  | `(SandboxInteractiveOptions) => Promise<SandboxInteractiveResult>`       | Launch an interactive session in the sandbox                                                                              |
-| `exec(cmd, options?)`   | `(command: string, options?: SandboxExecOptions) => Promise<ExecResult>` | Run a shell command in the sandbox. `cwd` defaults to the sandbox repo path. Non-zero `exitCode` is returned, not thrown. |
-| `close()`               | `() => Promise<CloseResult>`                                             | Tear down the container and sandbox                                                                                       |
-| `[Symbol.asyncDispose]` | `() => Promise<void>`                                                    | Auto teardown via `await using`                                                                                           |
+| 属性 / 方法             | 类型                                                                     | 说明                                                                        |
+| ----------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| `branch`                | string                                                                   | 沙箱所在分支                                                                |
+| `worktreePath`          | string                                                                   | worktree 在宿主机上的路径                                                   |
+| `run(options)`          | `(SandboxRunOptions) => Promise<SandboxRunResult>`                       | 在已有沙箱内调用代理                                                        |
+| `interactive(options)`  | `(SandboxInteractiveOptions) => Promise<SandboxInteractiveResult>`       | 在沙箱内启动交互会话                                                        |
+| `exec(cmd, options?)`   | `(command: string, options?: SandboxExecOptions) => Promise<ExecResult>` | 在沙箱中执行 shell 命令。`cwd` 默认沙箱仓库路径。非零 exitCode 返回，不抛出 |
+| `close()`               | `() => Promise<CloseResult>`                                             | 销毁容器与沙箱                                                              |
+| `[Symbol.asyncDispose]` | `() => Promise<void>`                                                    | 通过 `await using` 自动销毁                                                 |
 
 #### `SandboxRunOptions`
 
-| Option                     | Type               | Default                       | Description                                                                                                                          |
-| -------------------------- | ------------------ | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `agent`                    | AgentProvider      | —                             | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-8")`)                                                                  |
-| `prompt`                   | string             | —                             | Inline prompt (mutually exclusive with `promptFile`)                                                                                 |
-| `promptFile`               | string             | —                             | Path to prompt file (mutually exclusive with `prompt`)                                                                               |
-| `promptArgs`               | PromptArgs         | —                             | Key-value map for `{{KEY}}` placeholder substitution                                                                                 |
-| `maxIterations`            | number             | `1`                           | Maximum iterations to run                                                                                                            |
-| `completionSignal`         | string \| string[] | `<promise>COMPLETE</promise>` | String(s) the agent emits to stop the iteration loop early                                                                           |
-| `idleTimeoutSeconds`       | number             | `600`                         | Idle timeout in seconds — resets on each agent output event                                                                          |
-| `completionTimeoutSeconds` | number             | `60`                          | Grace window after the completion signal is seen but the agent process hasn't exited                                                 |
-| `name`                     | string             | —                             | Display name for the run                                                                                                             |
-| `logging`                  | object             | file (auto-generated)         | `{ type: 'file', path }` or `{ type: 'stdout' }`                                                                                     |
-| `resumeSession`            | string             | —                             | Resume a prior session by ID for agents that support resume. Incompatible with `maxIterations > 1`. Session file must exist on host. |
-| `signal`                   | AbortSignal        | —                             | Cancels the run when aborted; handle stays usable afterward                                                                          |
+| 选项                       | 类型               | 默认值                        | 说明                                                                  |
+| -------------------------- | ------------------ | ----------------------------- | --------------------------------------------------------------------- |
+| `agent`                    | AgentProvider      | —                             | **必填。** 代理提供商（如 `claudeCode("claude-opus-4-8")`）           |
+| `prompt`                   | string             | —                             | 内联提示词（与 `promptFile` 互斥）                                    |
+| `promptFile`               | string             | —                             | 提示词文件路径（与 `prompt` 互斥）                                    |
+| `promptArgs`               | PromptArgs         | —                             | `{{KEY}}` 占位符替换的键值映射                                        |
+| `maxIterations`            | number             | `1`                           | 最大迭代次数                                                          |
+| `completionSignal`         | string \| string[] | `<promise>COMPLETE</promise>` | 代理发出后提前结束迭代循环的字符串                                    |
+| `idleTimeoutSeconds`       | number             | `600`                         | 空闲超时（秒）——每次代理输出事件重置                                  |
+| `completionTimeoutSeconds` | number             | `60`                          | 观察到完成信号但代理进程未退出后的宽限窗口                            |
+| `name`                     | string             | —                             | 运行显示名                                                            |
+| `logging`                  | object             | file（自动生成）              | `{ type: 'file', path }` 或 `{ type: 'stdout' }`                      |
+| `resumeSession`            | string             | —                             | 按 ID 恢复先前会话。与 `maxIterations > 1` 不兼容。宿主机须有会话文件 |
+| `signal`                   | AbortSignal        | —                             | 中止时取消运行；句柄之后仍可用                                        |
 
 #### `SandboxRunResult`
 
-| Field                      | Type                                                                                     | Description                                                                                                                         |
-| -------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `iterations`               | `IterationResult[]`                                                                      | Per-iteration results (use `.length` for the count)                                                                                 |
-| `completionSignal`         | string?                                                                                  | The matched completion signal string, or `undefined` if none fired                                                                  |
-| `stdout`                   | string                                                                                   | Combined agent output from all iterations                                                                                           |
-| `commits`                  | `{ sha }[]`                                                                              | Commits created during the run                                                                                                      |
-| `logFilePath`              | string?                                                                                  | Path to the log file (only when logging to a file)                                                                                  |
-| `resume(prompt, options?)` | `(prompt: string, options?: ResumeSandboxRunResultOptions) => Promise<SandboxRunResult>` | Continue the captured session for one iteration inside the same warm sandbox. Present only when the provider captured a session id. |
-| `fork(prompt, options?)`   | `(prompt: string, options?: ResumeSandboxRunResultOptions) => Promise<SandboxRunResult>` | Fork the captured session for one iteration inside the same warm sandbox. The parent session is left intact (ADR 0018).             |
+| 字段                       | 类型                                                                                     | 说明                                                                       |
+| -------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `iterations`               | `IterationResult[]`                                                                      | 每轮迭代结果（用 `.length` 取数量）                                        |
+| `completionSignal`         | string?                                                                                  | 匹配到的完成信号，未触发则为 `undefined`                                   |
+| `stdout`                   | string                                                                                   | 所有迭代的合并代理输出                                                     |
+| `commits`                  | `{ sha }[]`                                                                              | 运行期间创建的提交                                                         |
+| `logFilePath`              | string?                                                                                  | 日志文件路径（仅文件日志时）                                               |
+| `resume(prompt, options?)` | `(prompt: string, options?: ResumeSandboxRunResultOptions) => Promise<SandboxRunResult>` | 在同一温沙箱内继续已捕获会话的一轮迭代。仅当提供商捕获了 session id 时存在 |
+| `fork(prompt, options?)`   | `(prompt: string, options?: ResumeSandboxRunResultOptions) => Promise<SandboxRunResult>` | 在同一温沙箱内从已捕获会话分叉一轮迭代。父会话保持不变（ADR 0018）         |
 
 #### `CloseResult`
 
-| Field                   | Type    | Description                                                              |
-| ----------------------- | ------- | ------------------------------------------------------------------------ |
-| `preservedWorktreePath` | string? | Host path to the preserved worktree, set when it had uncommitted changes |
+| 字段                    | 类型    | 说明                                           |
+| ----------------------- | ------- | ---------------------------------------------- |
+| `preservedWorktreePath` | string? | 有未提交改动时保留的 worktree 在宿主机上的路径 |
 
-### `createWorktree()` — independent worktree lifecycle
+### `createWorktree()`——独立 worktree 生命周期
 
-Use `createWorktree()` when you need a worktree (git worktree) as an independent, first-class concept — separate from any sandbox. This is useful when you want to run an interactive session first and then hand the same worktree to a sandboxed AFK agent.
+需要将 git worktree 作为与沙箱无关的一等概念时使用 `createWorktree()`——例如先交互探索，再将同一 worktree 交给沙箱化 AFK 代理。
 
-Only `branch` and `merge-to-head` strategies are accepted; `head` is a compile-time type error since it means no worktree.
+仅接受 `branch` 与 `merge-to-head` 策略；`head` 在类型层面为错误（表示不创建 worktree）。
 
-Pass `cwd` to target a repo other than `process.cwd()`. Relative paths resolve against `process.cwd()`; absolute paths pass through. A `CwdError` is thrown if the path does not exist or is not a directory.
+传 `cwd` 可指向非 `process.cwd()` 的仓库。相对路径相对 `process.cwd()` 解析；绝对路径原样使用。路径不存在或不是目录时抛出 `CwdError`。
 
 ```typescript
-import { createWorktree } from "@ai-hero/sandcastle";
+import { createWorktree } from "@yogioo/sandcastle";
 
 await using wt = await createWorktree({
   branchStrategy: { type: "branch", branch: "agent/fix-42" },
   copyToWorktree: ["node_modules"],
-  cwd: "/path/to/other-repo", // optional — defaults to process.cwd()
+  cwd: "/path/to/other-repo", // 可选——默认 process.cwd()
 });
 
-console.log(wt.worktreePath); // host path to the worktree
+console.log(wt.worktreePath); // worktree 在宿主机上的路径
 console.log(wt.branch); // "agent/fix-42"
 
-// Run an interactive session in the worktree (defaults to noSandbox)
+// 在 worktree 中运行交互会话（默认 noSandbox）
 await wt.interactive({
   agent: claudeCode("claude-opus-4-8"),
-  prompt: "Explore the codebase and understand the bug.",
+  prompt: "探索代码库并理解该 bug。",
 });
 
-// Run an AFK agent in the worktree (sandbox is required)
+// 在 worktree 中运行 AFK 代理（必须提供沙箱）
 const result = await wt.run({
   agent: claudeCode("claude-opus-4-8"),
   sandbox: docker({ imageName: "sandcastle:myrepo" }),
-  prompt: "Fix issue #42.",
+  prompt: "修复 issue #42。",
   maxIterations: 3,
 });
-console.log(result.commits); // commits made during the run
+console.log(result.commits); // 运行期间的提交
 
-// Create a long-lived sandbox from the worktree
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+// 从 worktree 创建长生命周期沙箱
+import { docker } from "@yogioo/sandcastle/sandboxes/docker";
 
 await using sandbox = await wt.createSandbox({
   sandbox: docker(),
   hooks: { sandbox: { onSandboxReady: [{ command: "npm install" }] } },
 });
 
-// sandbox.close() tears down the container only — the worktree stays
+// sandbox.close() 仅销毁容器——worktree 保留
 await sandbox.close();
 
-// wt.close() cleans up the worktree
+// wt.close() 清理 worktree
 ```
 
-`wt.close()` checks for uncommitted changes: if the worktree is dirty, it's preserved on disk; if clean, it's removed. `await using` calls `close()` automatically. The worktree persists after `run()`, `interactive()`, and `createSandbox()` complete, so you can hand it to another agent or inspect it.
+`wt.close()` 会检查未提交改动：worktree 脏则保留在磁盘；干净则删除。`await using` 会自动调用 `close()`。`run()`、`interactive()`、`createSandbox()` 完成后 worktree 仍存在，可交给其他代理或人工检查。
 
-With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.interactive()` merges the agent's commits back to the host's current branch before returning, and the worktree's source branch is preserved across calls so subsequent ones can reuse the same handle. (This differs from top-level `run()`, where the temp branch is deleted after the merge.)
+使用 `branchStrategy: { type: "merge-to-head" }` 时，每次 `wt.run()` / `wt.interactive()` 会在返回前将代理提交合并回宿主机当前分支，worktree 源分支跨调用保留。（与顶层 `run()` 不同——后者合并后会删除临时分支。）
 
-**Split ownership**: When a sandbox is created via `wt.createSandbox()`, `sandbox.close()` tears down the container only — the worktree remains. `wt.close()` is responsible for worktree cleanup. This differs from the top-level `createSandbox()`, where `sandbox.close()` owns both container and worktree.
+**所有权拆分**：通过 `wt.createSandbox()` 创建沙箱时，`sandbox.close()` 只销毁容器，worktree 由 `wt.close()` 负责。顶层 `createSandbox()` 则 `sandbox.close()` 同时拥有容器与 worktree。
 
 #### `CreateWorktreeOptions`
 
-| Option           | Type                   | Default | Description                                                                                                         |
-| ---------------- | ---------------------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
-| `branchStrategy` | WorktreeBranchStrategy | —       | **Required.** `{ type: "branch", branch }` or `{ type: "merge-to-head" }`                                           |
-| `copyToWorktree` | string[]               | —       | Host-relative file paths to copy into the worktree at creation time                                                 |
-| `timeouts`       | Timeouts               | —       | Override built-in lifecycle step timeouts (`copyToWorktreeMs`, `gitSetupMs`, `commitCollectionMs`, `mergeToHostMs`) |
+| 选项             | 类型                   | 默认值              | 说明                                                                   |
+| ---------------- | ---------------------- | ------------------- | ---------------------------------------------------------------------- |
+| `branchStrategy` | WorktreeBranchStrategy | —                   | **必填。** `{ type: "branch", branch }` 或 `{ type: "merge-to-head" }` |
+| `stateDir`       | string                 | 用户缓存目录       | Sandcastle 状态根；worktree 与日志写入此目录                           |
+| `copyToWorktree` | string[]               | —                   | 创建时复制进 worktree 的、相对宿主机的文件路径                         |
+| `timeouts`       | Timeouts               | —                   | 覆盖内置生命周期超时                                                   |
 
 #### `Worktree`
 
-| Property / Method        | Type                                                                  | Description                                         |
-| ------------------------ | --------------------------------------------------------------------- | --------------------------------------------------- |
-| `branch`                 | string                                                                | The branch the worktree is on                       |
-| `worktreePath`           | string                                                                | Host path to the worktree                           |
-| `run(options)`           | `(options: WorktreeRunOptions) => Promise<WorktreeRunResult>`         | Run an AFK agent in the worktree (sandbox required) |
-| `interactive(options)`   | `(options: WorktreeInteractiveOptions) => Promise<InteractiveResult>` | Run an interactive agent session in the worktree    |
-| `createSandbox(options)` | `(options: WorktreeCreateSandboxOptions) => Promise<Sandbox>`         | Create a long-lived sandbox backed by this worktree |
-| `close()`                | `() => Promise<CloseResult>`                                          | Clean up the worktree (preserves if dirty)          |
-| `[Symbol.asyncDispose]`  | `() => Promise<void>`                                                 | Auto cleanup via `await using`                      |
+| 属性 / 方法              | 类型                                                                  | 说明                                  |
+| ------------------------ | --------------------------------------------------------------------- | ------------------------------------- |
+| `branch`                 | string                                                                | worktree 所在分支                     |
+| `worktreePath`           | string                                                                | worktree 在宿主机上的路径             |
+| `run(options)`           | `(options: WorktreeRunOptions) => Promise<WorktreeRunResult>`         | 在 worktree 中运行 AFK 代理（须沙箱） |
+| `interactive(options)`   | `(options: WorktreeInteractiveOptions) => Promise<InteractiveResult>` | 在 worktree 中运行交互代理            |
+| `createSandbox(options)` | `(options: WorktreeCreateSandboxOptions) => Promise<Sandbox>`         | 基于此 worktree 创建长生命周期沙箱    |
+| `close()`                | `() => Promise<CloseResult>`                                          | 清理 worktree（脏则保留）             |
+| `[Symbol.asyncDispose]`  | `() => Promise<void>`                                                 | 通过 `await using` 自动清理           |
 
 #### `WorktreeInteractiveOptions`
 
-| Option       | Type                   | Default       | Description                                                                                       |
-| ------------ | ---------------------- | ------------- | ------------------------------------------------------------------------------------------------- |
-| `agent`      | AgentProvider          | —             | **Required.** Agent provider                                                                      |
-| `sandbox`    | AnySandboxProvider     | `noSandbox()` | Sandbox provider (defaults to no sandbox)                                                         |
-| `prompt`     | string                 | —             | Inline prompt (mutually exclusive with `promptFile`)                                              |
-| `promptFile` | string                 | —             | Path to prompt file                                                                               |
-| `name`       | string                 | —             | Optional session name                                                                             |
-| `hooks`      | SandboxHooks           | —             | Lifecycle hooks (`host.*`, `sandbox.*`)                                                           |
-| `promptArgs` | PromptArgs             | —             | Key-value map for `{{KEY}}` placeholder substitution                                              |
-| `env`        | Record<string, string> | —             | Environment variables to inject into the sandbox                                                  |
-| `signal`     | AbortSignal            | —             | Cancel the session when aborted. The worktree is preserved on disk. Rejects with `signal.reason`. |
+| 选项         | 类型                   | 默认值        | 说明                                                         |
+| ------------ | ---------------------- | ------------- | ------------------------------------------------------------ |
+| `agent`      | AgentProvider          | —             | **必填。** 代理提供商                                        |
+| `sandbox`    | AnySandboxProvider     | `noSandbox()` | 沙箱提供商（默认无沙箱）                                     |
+| `prompt`     | string                 | —             | 内联提示词（与 `promptFile` 互斥）                           |
+| `promptFile` | string                 | —             | 提示词文件路径                                               |
+| `name`       | string                 | —             | 可选会话名                                                   |
+| `hooks`      | SandboxHooks           | —             | 生命周期钩子（`host.*`、`sandbox.*`）                        |
+| `promptArgs` | PromptArgs             | —             | `{{KEY}}` 占位符替换                                         |
+| `env`        | Record<string, string> | —             | 注入沙箱的环境变量                                           |
+| `signal`     | AbortSignal            | —             | 中止时取消会话。worktree 保留在磁盘。以 `signal.reason` 拒绝 |
 
 #### `WorktreeRunOptions`
 
-| Option                     | Type                   | Default | Description                                                                                                                          |
-| -------------------------- | ---------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `agent`                    | AgentProvider          | —       | **Required.** Agent provider                                                                                                         |
-| `sandbox`                  | SandboxProvider        | —       | **Required.** Sandbox provider (AFK agents must be sandboxed)                                                                        |
-| `prompt`                   | string                 | —       | Inline prompt (mutually exclusive with `promptFile`)                                                                                 |
-| `promptFile`               | string                 | —       | Path to prompt file                                                                                                                  |
-| `maxIterations`            | number                 | 1       | Maximum iterations to run                                                                                                            |
-| `completionSignal`         | string \| string[]     | —       | Substring(s) to stop the iteration loop early                                                                                        |
-| `idleTimeoutSeconds`       | number                 | 600     | Idle timeout in seconds                                                                                                              |
-| `completionTimeoutSeconds` | number                 | 60      | Grace window after completion signal is seen but agent process hasn't exited                                                         |
-| `name`                     | string                 | —       | Optional run name                                                                                                                    |
-| `logging`                  | LoggingOption          | file    | Logging mode                                                                                                                         |
-| `hooks`                    | SandboxHooks           | —       | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                              |
-| `promptArgs`               | PromptArgs             | —       | Key-value map for `{{KEY}}` placeholder substitution                                                                                 |
-| `env`                      | Record<string, string> | —       | Environment variables to inject into the sandbox                                                                                     |
-| `resumeSession`            | string                 | —       | Resume a prior session by ID for agents that support resume. Incompatible with `maxIterations > 1`. Session file must exist on host. |
-| `signal`                   | AbortSignal            | —       | Cancel the run when aborted. Kills the in-flight agent subprocess; the worktree is preserved on disk. Rejects with `signal.reason`.  |
+| 选项                       | 类型                   | 默认值 | 说明                                                  |
+| -------------------------- | ---------------------- | ------ | ----------------------------------------------------- |
+| `agent`                    | AgentProvider          | —      | **必填。** 代理提供商                                 |
+| `sandbox`                  | SandboxProvider        | —      | **必填。** 沙箱提供商（AFK 代理必须沙箱化）           |
+| `prompt`                   | string                 | —      | 内联提示词（与 `promptFile` 互斥）                    |
+| `promptFile`               | string                 | —      | 提示词文件路径                                        |
+| `maxIterations`            | number                 | 1      | 最大迭代次数                                          |
+| `completionSignal`         | string \| string[]     | —      | 提前结束迭代循环的子串                                |
+| `idleTimeoutSeconds`       | number                 | 600    | 空闲超时（秒）                                        |
+| `completionTimeoutSeconds` | number                 | 60     | 完成信号后、进程未退出时的宽限窗口                    |
+| `name`                     | string                 | —      | 可选运行名                                            |
+| `logging`                  | LoggingOption          | file   | 日志模式                                              |
+| `hooks`                    | SandboxHooks           | —      | 生命周期钩子                                          |
+| `promptArgs`               | PromptArgs             | —      | `{{KEY}}` 占位符替换                                  |
+| `env`                      | Record<string, string> | —      | 注入沙箱的环境变量                                    |
+| `resumeSession`            | string                 | —      | 恢复先前会话。与 `maxIterations > 1` 不兼容           |
+| `signal`                   | AbortSignal            | —      | 中止时取消运行；终止进行中的代理子进程；worktree 保留 |
 
 #### `WorktreeRunResult`
 
-| Property           | Type                | Description                                            |
-| ------------------ | ------------------- | ------------------------------------------------------ |
-| `iterations`       | `IterationResult[]` | Per-iteration results (use `.length` for the count)    |
-| `completionSignal` | string              | The matched completion signal, or undefined            |
-| `stdout`           | string              | Combined stdout output from all agent iterations       |
-| `commits`          | { sha: string }[]   | List of commits made by the agent during the run       |
-| `branch`           | string              | The branch name the agent worked on                    |
-| `logFilePath`      | string              | Path to the log file, if logging was drained to a file |
+| 属性               | 类型                | 说明                           |
+| ------------------ | ------------------- | ------------------------------ |
+| `iterations`       | `IterationResult[]` | 每轮迭代结果                   |
+| `completionSignal` | string              | 匹配到的完成信号，或 undefined |
+| `stdout`           | string              | 所有代理迭代的合并 stdout      |
+| `commits`          | { sha: string }[]   | 代理运行期间创建的提交列表     |
+| `branch`           | string              | 代理工作的分支名               |
+| `logFilePath`      | string              | 日志文件路径（若写入文件）     |
 
 #### `WorktreeCreateSandboxOptions`
 
-| Option           | Type            | Default | Description                                                                                                         |
-| ---------------- | --------------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
-| `sandbox`        | SandboxProvider | —       | **Required.** Sandbox provider (e.g. `docker()`)                                                                    |
-| `hooks`          | SandboxHooks    | —       | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                             |
-| `copyToWorktree` | string[]        | —       | Host-relative file paths to copy into the worktree at creation time                                                 |
-| `timeouts`       | Timeouts        | —       | Override built-in lifecycle step timeouts (`copyToWorktreeMs`, `gitSetupMs`, `commitCollectionMs`, `mergeToHostMs`) |
+| 选项             | 类型            | 默认值 | 说明                                   |
+| ---------------- | --------------- | ------ | -------------------------------------- |
+| `sandbox`        | SandboxProvider | —      | **必填。** 沙箱提供商（如 `docker()`） |
+| `hooks`          | SandboxHooks    | —      | 生命周期钩子                           |
+| `copyToWorktree` | string[]        | —      | 创建时复制进 worktree 的文件路径       |
+| `timeouts`       | Timeouts        | —      | 覆盖内置生命周期超时                   |
 
-## How it works
+## 工作原理
 
-Sandcastle uses a **branch strategy** configured on the sandbox provider to control how the agent's changes relate to branches. There are three strategies:
+Sandcastle 通过 **分支策略** 控制代理改动与分支的关系。有三种策略：
 
-- **Head** (`{ type: "head" }`) — The agent writes directly to the host working directory. No worktree, no branch indirection. This is the default for bind-mount providers like `docker()`.
-- **Merge-to-head** (`{ type: "merge-to-head" }`) — Sandcastle creates a temporary branch in a git worktree. The agent works on the temp branch, and changes are merged back to HEAD when done. The temp branch is cleaned up after merge.
-- **Branch** (`{ type: "branch", branch: "foo" }`) — Commits land on an explicitly named branch in a git worktree. Re-running with the same branch reuses the existing worktree and fast-forwards it from `origin` when safe — see [ADR 0003](docs/adr/0003-reuse-worktree-by-default.md).
+- **Head**（`{ type: "head" }`）——代理直接写入宿主机工作目录。无 worktree、无分支间接。绑定挂载提供商（如 `docker()`）的默认值。
+- **Merge-to-head**（`{ type: "merge-to-head" }`）——在 git worktree 中创建临时分支，代理在临时分支上工作，完成后合并回 HEAD，临时分支在合并后清理。
+- **Branch**（`{ type: "branch", branch: "foo" }`）——提交落在显式命名的 worktree 分支上。相同分支重复运行会复用已有 worktree，并在安全时从 `origin` fast-forward——见 [ADR 0003](docs/adr/0003-reuse-worktree-by-default.md)。
 
-For bind-mount providers (like Docker), the worktree directory is bind-mounted into the container — the agent writes directly to the host filesystem through the mount, so no sync is needed.
+对绑定挂载提供商（如 Docker），worktree 目录挂载进容器——代理通过挂载直接写宿主机文件系统，无需同步。
 
-From your point of view, you just configure `branchStrategy: { type: 'branch', branch: 'foo' }` on `run()`, and get a commit on branch `foo` once it's complete. All 100% local.
+对你而言，只需在 `run()` 上配置 `branchStrategy: { type: 'branch', branch: 'foo' }`，完成后即可在分支 `foo` 上得到提交。全程本地。
 
-## Prompts
+## 提示词
 
-Sandcastle uses a flexible prompt system. You write the prompt, and the engine executes it — no opinions about workflow, task management, or context sources are imposed.
+Sandcastle 使用灵活的提示词系统。你编写提示词，引擎执行——不强制工作流、任务管理或上下文来源。
 
-### Prompt resolution
+### 提示词解析
 
-You must provide exactly one of:
+必须且只能提供以下之一：
 
-1. `prompt: "inline string"` — pass an inline prompt directly via `RunOptions`
-2. `promptFile: "./path/to/prompt.md"` — point to a specific file via `RunOptions`
+1. `prompt: "内联字符串"`——通过 `RunOptions` 直接传入
+2. `promptFile: "./path/to/prompt.md"`——通过 `RunOptions` 指向文件
 
-`prompt` and `promptFile` are mutually exclusive — providing both is an error. If neither is provided, `run()` throws an error asking you to supply one.
+`prompt` 与 `promptFile` 互斥——同时提供会报错。两者都不提供时，`run()` 会要求你提供其一。
 
-**Inline prompts (`prompt: "..."`) are passed to the agent literally.** No `{{KEY}}` substitution, no `` !`command` `` expansion, no built-in `{{SOURCE_BRANCH}}` / `{{TARGET_BRANCH}}` injection. If you need values interpolated into an inline prompt, build the string in JavaScript (`` `Work on ${branch}…` ``). Passing `promptArgs` alongside an inline prompt is an error — switch to `promptFile` to use substitution.
+**内联提示词（`prompt: "..."`）会原样传给代理。** 不做 `{{KEY}}` 替换、不做 `` !`command` `` 展开、不注入内置 `{{SOURCE_BRANCH}}` / `{{TARGET_BRANCH}}`。若需在内联提示词中插值，在 JavaScript 中拼接字符串（`` `在分支 ${branch} 上工作…` ``）。内联提示词与 `promptArgs` 同时传入会报错——需替换请改用 `promptFile`。
 
-The substitution and expansion features below apply **only** to prompts sourced from `promptFile`.
+以下替换与展开功能 **仅适用于** 来自 `promptFile` 的提示词。
 
-> **Convention**: `sandcastle init` scaffolds `.sandcastle/prompt.md` and all templates explicitly reference it via `promptFile: ".sandcastle/prompt.md"`. This is a convention, not an automatic fallback — Sandcastle does not read `.sandcastle/prompt.md` unless you pass it as `promptFile`.
+> **约定**：`sandcastle init` 会脚手架 `.sandcastle/prompt.md`，模板通过 `promptFile: ".sandcastle/prompt.md"` 引用。这是约定，不是自动回退——除非你传入 `promptFile`，Sandcastle 不会读取 `.sandcastle/prompt.md`。
 
-### Dynamic context with `` !`command` ``
+### 使用 `` !`command` `` 注入动态上下文
 
-Use `` !`command` `` expressions in your prompt to pull in dynamic context. Each expression is replaced with the command's stdout before the prompt is sent to the agent. All expressions in a prompt run **in parallel** for faster expansion.
+在提示词中使用 `` !`command` `` 拉取动态上下文。每个表达式在发送给代理前会被命令的 stdout 替换。同一提示词内所有表达式 **并行** 执行以加快展开。
 
-Commands run **inside the sandbox** after `sandbox.onSandboxReady` hooks complete, so they see the same repo state the agent sees (including installed dependencies).
+命令在 `sandbox.onSandboxReady` 钩子完成后 **在沙箱内** 运行，因此与代理看到相同的仓库状态（含已安装依赖）。
 
 ```markdown
-# Open issues
+# 打开的 issue
 
 !`gh issue list --state open --label Sandcastle --json number,title,body,comments,labels --limit 100`
 
-# Recent commits
+# 最近提交
 
 !`git log --oneline -10`
 ```
 
-If any command exits with a non-zero code, the run fails immediately with an error.
+任一命令非零退出时，运行立即失败并报错。
 
-### Prompt arguments with `{{KEY}}`
+### 使用 `{{KEY}}` 的提示词参数
 
-Use `{{KEY}}` placeholders in your prompt to inject values from the `promptArgs` option. This is useful for reusing the same prompt file across multiple runs with different parameters.
+在提示词中用 `{{KEY}}` 占位符，从 `promptArgs` 注入值。便于同一提示词文件在多轮运行中使用不同参数。
 
 ```typescript
-import { run } from "@ai-hero/sandcastle";
+import { run } from "@yogioo/sandcastle";
 
 await run({
   promptFile: "./my-prompt.md",
@@ -607,46 +691,46 @@ await run({
 });
 ```
 
-In the prompt file:
+提示词文件中：
 
 ```markdown
-Work on issue #{{ISSUE_NUMBER}} (priority: {{PRIORITY}}).
+处理 issue #{{ISSUE_NUMBER}}（优先级：{{PRIORITY}}）。
 ```
 
-Prompt argument substitution runs on the host before shell expression expansion, so `{{KEY}}` placeholders inside `` !`command` `` expressions are replaced first:
+参数替换在宿主机上、shell 表达式展开之前执行，因此 `` !`command` `` 内的 `{{KEY}}` 会先被替换：
 
 ```markdown
 !`gh issue view {{ISSUE_NUMBER}} --json body -q .body`
 ```
 
-A `{{KEY}}` placeholder with no matching prompt argument is an error. Unused prompt arguments produce a warning.
+无对应 `promptArgs` 的 `{{KEY}}` 会报错。未使用的 `promptArgs` 会产生警告。
 
-`` !`command` `` expansion only runs on shell blocks written in the prompt file itself. Any `` !`…` `` pattern that appears inside an argument value is treated as inert text — it won't be executed against the host shell. This makes it safe to pass user-authored content (issue titles, PR descriptions, docs excerpts) through `promptArgs`.
+`` !`command` `` 展开仅对提示词文件中书写的 shell 块生效。参数值内出现的 `` !`…` `` 视为普通文本，不会对宿主机 shell 执行——可安全通过 `promptArgs` 传入用户内容（issue 标题、PR 描述、文档摘录）。
 
-### Built-in prompt arguments
+### 内置提示词参数
 
-Sandcastle automatically injects two built-in prompt arguments into every prompt:
+Sandcastle 自动向每个提示词注入两个内置参数：
 
-| Placeholder         | Value                                                             |
-| ------------------- | ----------------------------------------------------------------- |
-| `{{SOURCE_BRANCH}}` | The branch the agent works on (determined by the branch strategy) |
-| `{{TARGET_BRANCH}}` | The host's active branch at `run()` time                          |
+| 占位符              | 值                               |
+| ------------------- | -------------------------------- |
+| `{{SOURCE_BRANCH}}` | 代理工作的分支（由分支策略决定） |
+| `{{TARGET_BRANCH}}` | `run()` 时宿主机当前活动分支     |
 
-Use them in your prompt without passing them via `promptArgs`:
+无需通过 `promptArgs` 传入即可在提示词中使用：
 
 ```markdown
-You are working on {{SOURCE_BRANCH}}. When diffing, compare against {{TARGET_BRANCH}}.
+你正在 {{SOURCE_BRANCH}} 上工作。做 diff 时与 {{TARGET_BRANCH}} 比较。
 ```
 
-Passing `SOURCE_BRANCH` or `TARGET_BRANCH` in `promptArgs` is an error — built-in prompt arguments cannot be overridden.
+在 `promptArgs` 中传入 `SOURCE_BRANCH` 或 `TARGET_BRANCH` 会报错——内置参数不可覆盖。
 
-### Early termination with `<promise>COMPLETE</promise>`
+### 使用 `<promise>COMPLETE</promise>` 提前结束
 
-When the agent outputs `<promise>COMPLETE</promise>`, the orchestrator stops the iteration loop early. This is a convention you document in your prompt for the agent to follow — the engine never injects it.
+代理输出 `<promise>COMPLETE</promise>` 时，编排器提前结束迭代循环。这是你在提示词中约定给代理的规则——引擎不会自动注入。
 
-This is useful for task-based workflows where the agent should stop once it has finished, rather than running all remaining iterations.
+适用于任务型工作流：代理完成后应停止，而非跑满剩余迭代。
 
-You can override the default signal by passing `completionSignal` to `run()`. It accepts a single string or an array of strings:
+可通过向 `run()` 传入 `completionSignal` 覆盖默认信号。接受单个字符串或字符串数组：
 
 ```ts
 await run({
@@ -654,49 +738,48 @@ await run({
   completionSignal: "DONE",
 });
 
-// Or pass multiple signals — the loop stops on the first match:
+// 或多个信号——首个匹配即停止：
 await run({
   // ...
   completionSignal: ["TASK_COMPLETE", "TASK_ABORTED"],
 });
 ```
 
-Tell the agent to output your chosen string(s) in the prompt, and the orchestrator will stop when it detects any of them. The matched signal is returned as `result.completionSignal`.
+在提示词中要求代理输出所选字符串，编排器检测到任一匹配即停止。匹配的信号作为 `result.completionSignal` 返回。
 
-#### Hanging processes after the completion signal
+#### 完成信号后的挂起进程
 
-The agent process is expected to exit shortly after emitting the completion signal. When a child it spawned — a `gh`/git subprocess, a long-lived MCP server, etc. — inherits the agent's stdout pipe and keeps it open, the parent process can linger long past its logical end. Sandcastle would otherwise wait for the full `idleTimeoutSeconds` and fail with `AgentIdleTimeoutError`, throwing away the commits the agent already made.
+代理进程应在发出完成信号后很快退出。若其子进程（`gh`/git 子进程、长驻 MCP 服务器等）继承 stdout 管道并保持打开，父进程可能在逻辑结束后仍挂起。否则 Sandcastle 会等到完整 `idleTimeoutSeconds` 并以 `AgentIdleTimeoutError` 失败，丢弃代理已产生的提交。
 
-Instead, once the completion signal is observed in the output buffer, Sandcastle swaps in a short **completion timeout** (default 60 s). When it expires, the run resolves successfully with a warning that the process was hanging; `result.commits` and `result.completionSignal` are populated as if the process had exited cleanly. The timer resets on every subsequent output line, so trailing data emitted after the signal — token-usage events, terminal `result` events, a structured-output `<tag>` — is still captured.
+观察到完成信号后，Sandcastle 会切换到较短的 **完成超时**（默认 60 秒）。超时后运行仍成功结束，并警告进程挂起；`result.commits` 与 `result.completionSignal` 与正常退出一致。每次后续输出行会重置计时器，以便捕获信号后的尾部数据（token 用量、终端 `result` 事件、结构化输出 `<tag>` 等）。
 
-A clean process exit always wins the race, so healthy runs gain zero added latency. The completion timeout only matters when the process hangs.
+进程正常退出总是赢得竞态，健康运行无额外延迟。完成超时仅在进程挂起时生效。
 
-Tune the window with `completionTimeoutSeconds`:
+通过 `completionTimeoutSeconds` 调整：
 
 ```ts
 await run({
   // ...
-  completionTimeoutSeconds: 30, // shorter grace window
+  completionTimeoutSeconds: 30, // 更短宽限
 });
 ```
 
-This is independent of `idleTimeoutSeconds`. They cover different phases: `idleTimeoutSeconds` runs **before** any signal is seen (genuinely stuck agent → fail); `completionTimeoutSeconds` runs **after** the signal is seen (hanging process → succeed with warning). See [ADR 0019](docs/adr/0019-completion-timeout-for-hanging-process.md).
+与 `idleTimeoutSeconds` 独立：前者在 **看到信号之前**（真正卡死 → 失败）；后者在 **看到信号之后**（挂起进程 → 警告后成功）。见 [ADR 0019](docs/adr/0019-completion-timeout-for-hanging-process.md)。
 
-### Structured output
+### 结构化输出
 
-Use `Output.object()` to extract a typed, schema-validated JSON payload from the agent's stdout. The agent emits its answer inside an XML tag you specify, and Sandcastle parses, validates, and returns it on `result.output`. The schema can be any [Standard Schema](https://standardschema.dev) validator — the examples below use [Zod](https://zod.dev), but Valibot, ArkType, and others work identically. See [ADR 0010](docs/adr/0010-structured-output.md) for design rationale.
+使用 `Output.object()` 从代理 stdout 提取经 schema 校验的类型化 JSON。代理在你指定的 XML 标签内输出答案，Sandcastle 解析、校验并放在 `result.output`。schema 可为任意 [Standard Schema](https://standardschema.dev) 校验器——示例用 [Zod](https://zod.dev)，Valibot、ArkType 等同样适用。设计理由见 [ADR 0010](docs/adr/0010-structured-output.md)。
 
 ```ts
-import { run, Output, claudeCode } from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { run, Output, claudeCode } from "@yogioo/sandcastle";
+import { docker } from "@yogioo/sandcastle/sandboxes/docker";
 import { z } from "zod";
 
 const result = await run({
   agent: claudeCode("claude-opus-4-8"),
   sandbox: docker(),
-  prompt: `Analyze the code, and output the result as JSON inside <result> tags.
-    The result must match this schema:
-    { summary: string; score: string }
+  prompt: `分析代码，在 <result> 标签内以 JSON 输出结果。
+    结果须符合 schema：{ summary: string; score: string }
   `,
   output: Output.object({
     tag: "result",
@@ -704,33 +787,33 @@ const result = await run({
   }),
 });
 
-console.log(result.output.summary); // typed as string
-console.log(result.output.score); // typed as number
+console.log(result.output.summary); // 类型为 string
+console.log(result.output.score); // 类型为 number
 ```
 
-`Output.string({ tag })` extracts the tag contents as a plain string (trimmed, no JSON parsing). Both helpers require `maxIterations` to be `1` (the default). The resolved prompt must contain the configured opening tag literal.
+`Output.string({ tag })` 将标签内容作为纯字符串提取（trim，不解析 JSON）。两者均要求 `maxIterations` 为 `1`（默认）。解析后的提示词须包含配置的开标签字面量。
 
-When extraction or validation fails, `run()` throws a `StructuredOutputError`. Alongside `tag`, `rawMatched`, `cause`, `commits`, `branch`, and `preservedWorktreePath`, the error carries the `sessionId` (and `sessionFilePath`, when the session was captured) of the run that produced the bad output.
+提取或校验失败时，`run()` 抛出 `StructuredOutputError`。除 `tag`、`rawMatched`、`cause`、`commits`、`branch`、`preservedWorktreePath` 外，错误还携带产生错误输出的运行的 `sessionId`（及已捕获时的 `sessionFilePath`）。
 
-Pass `maxRetries` to have Sandcastle handle the retry loop for you. Each retry resumes the same agent session and feeds back a token-efficient description of the error, so the agent can re-emit a corrected tag without redoing the work. Retries require an agent provider that supports session resumption (`claudeCode`, `codex`, `pi`) — calling `run()` with `maxRetries > 0` against a non-resumable provider (`cursor`, `opencode`, `copilot`) throws immediately.
+传入 `maxRetries` 可由 Sandcastle 处理重试循环。每次重试恢复同一会话并反馈 token 高效的错误描述，代理可在不重复工作的前提下重新输出正确标签。重试要求支持会话恢复的提供商（`claudeCode`、`codex`、`pi`）——对不可恢复提供商（`cursor`、`opencode`、`copilot`）使用 `maxRetries > 0` 会立即抛出。
 
 ```ts
 const result = await run({
   agent: claudeCode("claude-opus-4-8"),
   sandbox: docker(),
-  prompt: "Analyze the code and emit JSON inside <result> tags.",
+  prompt: "分析代码并在 <result> 标签内输出 JSON。",
   output: Output.object({
     tag: "result",
     schema: z.object({ summary: z.string(), score: z.number() }),
-    maxRetries: 2, // 2 retries on top of the initial attempt
+    maxRetries: 2, // 在首次尝试之外再重试 2 次
   }),
 });
 ```
 
-If you need to drive the retry loop manually — for example, to customise the feedback prompt or rotate models on each attempt — leave `maxRetries` at its default of `0` and resume the failed session yourself:
+若需手动驱动重试循环——例如自定义反馈提示词或每轮轮换模型——将 `maxRetries` 保持默认 `0`，自行恢复失败会话：
 
 ```ts
-import { run, Output, StructuredOutputError } from "@ai-hero/sandcastle";
+import { run, Output, StructuredOutputError } from "@yogioo/sandcastle";
 
 try {
   return await run({ ...opts, output });
@@ -740,266 +823,277 @@ try {
       ...opts,
       output,
       resumeSession: e.sessionId,
-      prompt: `Your previous output failed: ${e.message}. Re-emit it inside <${e.tag}> tags.`,
+      prompt: `上次输出失败：${e.message}。请在 <${e.tag}> 标签内重新输出。`,
     });
   }
   throw e;
 }
 ```
 
-### Templates
+### 模板
 
-`sandcastle init` prompts you to choose a sandbox provider (Docker or Podman), an issue tracker (GitHub Issues, Beads, or Custom), and a template, which scaffolds a ready-to-use prompt and `main.mts` suited to a specific workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. Choosing **Custom** scaffolds the project in a deliberately broken-until-configured state plus a `.sandcastle/SETUP_ISSUE_TRACKER.md` prompt you feed to your coding agent, which wires up your own tracker by editing the scaffolded files in place. Five templates are available:
+`sandcastle init` 会提示选择沙箱提供商（Docker、Podman 或不使用沙箱）、是否使用 Git worktree、issue 跟踪器（GitHub Issues、Beads 或自定义）及模板，并将适合特定工作流的提示词与 `main.mts` 写入用户缓存状态目录。若项目 `package.json` 含 `"type": "module"`，文件名为 `main.ts`。选择 **自定义** 会生成故意未配置完成的状态，外加 `SETUP_ISSUE_TRACKER.md` 提示词，供编码代理接线你自己的跟踪器。共五种模板：
 
-| Template                       | Description                                                               |
-| ------------------------------ | ------------------------------------------------------------------------- |
-| `blank`                        | Bare scaffold — write your own prompt and orchestration                   |
-| `simple-loop`                  | Picks issues one by one and closes them                                   |
-| `sequential-reviewer`          | Implements issues one by one, with a code review step after each          |
-| `parallel-planner`             | Plans parallelizable issues, executes on separate branches, then merges   |
-| `parallel-planner-with-review` | Plans parallelizable issues, executes with per-branch review, then merges |
+| 模板                           | 说明                               |
+| ------------------------------ | ---------------------------------- |
+| `blank`                        | 空白脚手架——自行编写提示词与编排   |
+| `simple-loop`                  | 逐个选取 issue 并关闭              |
+| `sequential-reviewer`          | 逐个实现 issue，每步后代码审查     |
+| `parallel-planner`             | 规划可并行 issue，分分支执行后合并 |
+| `parallel-planner-with-review` | 规划可并行 issue，每分支审查后合并 |
 
-Select a template during `sandcastle init` when prompted, or re-run init in a fresh repo to try a different one.
+在 `sandcastle init` 提示时选择模板，或在新仓库重新 init 尝试其他模板。使用 `--state-dir` 可以显式指定状态目录；CLI 不会因为找不到外部项目而回退到仓库内的旧 `.sandcastle`。
 
-## CLI commands
+选择 `no-sandbox` 会使用 `noSandbox()`，代理命令直接在宿主机执行。交互选择“不使用 Git worktree”
+会生成 `branchStrategy: { type: "head" }`，直接修改当前工作目录；`sequential-reviewer`、
+`parallel-planner` 和 `parallel-planner-with-review` 依赖独立 worktree，因此不能关闭 worktree。
+
+## CLI 命令
 
 ### `sandcastle init`
 
-Scaffolds the `.sandcastle/` config directory and builds the container image. This is the first command you run in a new repo. You choose a sandbox provider (Docker or Podman) during init — selecting Podman writes a `Containerfile` instead of `Dockerfile` and uses `sandcastle podman build-image` for the build step.
+脚手架用户缓存中的 `.sandcastle/` 状态目录并按选择构建容器镜像。新仓库的第一步命令。init 时选择沙箱提供商（Docker、Podman 或 `no-sandbox`）。选 Podman 会写 `Containerfile` 而非 `Dockerfile`；选 `no-sandbox` 则不生成容器文件，也不会构建镜像，代理直接在宿主机运行。
 
-Init detects your host package manager (npm, pnpm, yarn, or bun) from a `packageManager` field or lockfile, defaulting to npm. Templates whose `main` file imports a host dependency — the planner templates import [Zod](https://zod.dev) for their `<plan>` output schema — prompt you to install it with that package manager when it isn't already in your `package.json`, so the first `npx tsx .sandcastle/main.ts` doesn't fail with `ERR_MODULE_NOT_FOUND`.
+init 从 `packageManager` 字段或锁文件检测宿主机包管理器（npm、pnpm、yarn、bun），默认 npm。模板 `main` 若导入宿主机依赖——规划模板为 `<plan>` 输出 schema 导入 [Zod](https://zod.dev)——会在 `package.json` 中尚未存在时提示用该包管理器安装，避免首次运行缓存目录中的 `main.ts` 出现 `ERR_MODULE_NOT_FOUND`。
 
-Every interactive prompt has a paired `--flag` so the entire init can run non-interactively (e.g. in CI or a scripted setup). When stdin is not a TTY and a required flag is missing, init fails fast with a clear error rather than wedging on a prompt.
+init 的主要选项会在交互界面中选择；同时保留已有的 `--flag` 以支持 CI 和脚本。是否使用 Git
+worktree 只在交互界面中选择，不增加命令行参数。stdin 非 TTY 且缺少必填 flag 时，init 快速失败并给出明确错误，而非卡在提示上。
 
-| Option                    | Required | Default                      | Description                                                                                                    |
-| ------------------------- | -------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `--image-name`            | No       | `sandcastle:<repo-dir-name>` | Docker image name                                                                                              |
-| `--agent`                 | No       | Interactive prompt           | Agent to use (`claude-code`, `pi`, `codex`, `cursor`, `opencode`, `copilot`)                                   |
-| `--model`                 | No       | Agent's default model        | Model to use (e.g. `claude-sonnet-4-6`). Defaults to agent's default                                           |
-| `--sandbox`               | No       | Interactive prompt           | Sandbox provider to use (`docker`, `podman`)                                                                   |
-| `--template`              | No       | Interactive prompt           | Template to scaffold (e.g. `blank`, `simple-loop`)                                                             |
-| `--issue-tracker`         | No       | Interactive prompt           | Issue tracker to use (`github-issues`, `beads`, `custom`)                                                      |
-| `--create-label`          | No       | Interactive prompt           | `true` / `false` — whether to create the `Sandcastle` GitHub label (only with `--issue-tracker github-issues`) |
-| `--build-image`           | No       | Interactive prompt           | `true` / `false` — whether to build the sandbox image now (silently ignored with `--issue-tracker custom`)     |
-| `--install-template-deps` | No       | Interactive prompt           | `true` / `false` — whether to install template host deps (e.g. `zod` for the planner templates)                |
+| 选项                      | 必填 | 默认值                       | 说明                                                                          |
+| ------------------------- | ---- | ---------------------------- | ----------------------------------------------------------------------------- |
+| `--image-name`            | 否   | `sandcastle:<repo-dir-name>` | Docker 镜像名                                                                 |
+| `--agent`                 | 否   | 交互提示                     | 代理（`claude-code`、`pi`、`codex`、`cursor`、`opencode`、`copilot`）         |
+| `--model`                 | 否   | 代理默认模型                 | 模型（如 `claude-sonnet-4-6`）                                                |
+| `--sandbox`               | 否   | 交互提示                     | 沙箱提供商（`docker`、`podman`、`no-sandbox`）                                |
+| `--template`              | 否   | 交互提示                     | 模板（如 `blank`、`simple-loop`）                                             |
+| `--issue-tracker`         | 否   | 交互提示                     | issue 跟踪器（`github-issues`、`beads`、`custom`）                            |
+| `--create-label`          | 否   | 交互提示                     | `true` / `false`——是否创建 `Sandcastle` GitHub 标签（仅 `github-issues`）     |
+| `--build-image`           | 否   | 交互提示                     | `true` / `false`——是否立即构建沙箱镜像（`custom` 或 `no-sandbox` 时静默忽略） |
+| `--install-template-deps` | 否   | 交互提示                     | `true` / `false`——是否安装模板宿主机依赖（如规划模板的 `zod`）                |
+| `--state-dir`             | 否   | 用户缓存目录                 | 覆盖 Sandcastle 状态目录；CLI 不会自动回退到仓库内 `.sandcastle`              |
 
-Creates the following files:
+默认在用户缓存状态目录创建以下文件：
 
 ```
 .sandcastle/
-├── Dockerfile      # Sandbox environment (customize as needed)
-├── prompt.md       # Agent instructions
-├── .env.example    # Token placeholders
-└── .gitignore      # Ignores .env, logs/
+├── Dockerfile      # 沙箱环境（使用 no-sandbox 时不会生成）
+├── main.ts         # 代理工作流入口（非 ESM 项目为 main.mts）
+├── prompt.md       # 代理说明
+├── .env.example    # 令牌占位符
+├── .dockerignore   # 防止凭据和运行时文件进入构建上下文
+└── .gitignore      # 忽略 .env、logs/、worktrees/、patches/
 ```
 
-Errors if `.sandcastle/` already exists to prevent overwriting customizations.
+若 `.sandcastle/` 已存在会报错，防止覆盖自定义内容。
 
 ### `sandcastle docker build-image`
 
-Rebuilds the Docker image from an existing `.sandcastle/` directory. Use this after modifying the Dockerfile. On Linux/macOS, the build automatically passes `--build-arg AGENT_UID=$(id -u)` and `AGENT_GID=$(id -g)` so the image's `agent` user matches the host UID — this prevents permission errors on image-built files without runtime chown.
+从已有 `.sandcastle/` 重建 Docker 镜像。修改 Dockerfile 后使用。Linux/macOS 上构建自动传入 `--build-arg AGENT_UID=$(id -u)` 与 `AGENT_GID=$(id -g)`，使镜像内 `agent` 用户与宿主机 UID 一致，避免镜像内构建文件的权限问题。
 
-| Option         | Required | Default                      | Description                                                                       |
-| -------------- | -------- | ---------------------------- | --------------------------------------------------------------------------------- |
-| `--image-name` | No       | `sandcastle:<repo-dir-name>` | Docker image name                                                                 |
-| `--dockerfile` | No       | —                            | Path to a custom Dockerfile (build context will be the current working directory) |
+| 选项           | 必填 | 默认值                       | 说明                                           |
+| -------------- | ---- | ---------------------------- | ---------------------------------------------- |
+| `--image-name` | 否   | `sandcastle:<repo-dir-name>` | Docker 镜像名                                  |
+| `--dockerfile` | 否   | —                            | 自定义 Dockerfile 路径（构建上下文为状态目录） |
+| `--state-dir`  | 否   | 自动解析                     | 覆盖状态目录                                   |
 
 ### `sandcastle docker remove-image`
 
-Removes the Docker image.
+删除 Docker 镜像。
 
-| Option         | Required | Default                      | Description       |
-| -------------- | -------- | ---------------------------- | ----------------- |
-| `--image-name` | No       | `sandcastle:<repo-dir-name>` | Docker image name |
+| 选项           | 必填 | 默认值                       | 说明          |
+| -------------- | ---- | ---------------------------- | ------------- |
+| `--image-name` | 否   | `sandcastle:<repo-dir-name>` | Docker 镜像名 |
 
 ### `sandcastle podman build-image`
 
-Builds the Podman image from an existing `.sandcastle/` directory. Use this after modifying the Containerfile.
+从已有 `.sandcastle/` 构建 Podman 镜像。修改 Containerfile 后使用。
 
-| Option            | Required | Default                      | Description                                                                          |
-| ----------------- | -------- | ---------------------------- | ------------------------------------------------------------------------------------ |
-| `--image-name`    | No       | `sandcastle:<repo-dir-name>` | Podman image name                                                                    |
-| `--containerfile` | No       | —                            | Path to a custom Containerfile (build context will be the current working directory) |
+| 选项              | 必填 | 默认值                       | 说明                                              |
+| ----------------- | ---- | ---------------------------- | ------------------------------------------------- |
+| `--image-name`    | 否   | `sandcastle:<repo-dir-name>` | Podman 镜像名                                     |
+| `--containerfile` | 否   | —                            | 自定义 Containerfile 路径（构建上下文为状态目录） |
+| `--state-dir`     | 否   | 自动解析                     | 覆盖状态目录                                      |
 
 ### `sandcastle podman remove-image`
 
-Removes the Podman image.
+删除 Podman 镜像。
 
-| Option         | Required | Default                      | Description       |
-| -------------- | -------- | ---------------------------- | ----------------- |
-| `--image-name` | No       | `sandcastle:<repo-dir-name>` | Podman image name |
+| 选项           | 必填 | 默认值                       | 说明          |
+| -------------- | ---- | ---------------------------- | ------------- |
+| `--image-name` | 否   | `sandcastle:<repo-dir-name>` | Podman 镜像名 |
 
 ### `RunOptions`
 
-| Option                     | Type               | Default                       | Description                                                                                                                                                                                                                  |
-| -------------------------- | ------------------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent`                    | AgentProvider      | —                             | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-8")`, `pi("claude-sonnet-4-6")`, `codex("gpt-5.4")`, `cursor("composer-2")`, `opencode("opencode/big-pickle")`, `copilot("claude-sonnet-4.5")`)                |
-| `sandbox`                  | SandboxProvider    | —                             | **Required.** Sandbox provider (e.g. `docker()`, `podman()`, `docker({ imageName: "sandcastle:local" })`)                                                                                                                    |
-| `cwd`                      | string             | `process.cwd()`               | Host repo directory — anchor for `.sandcastle/` artifacts and git operations. Relative paths resolve against `process.cwd()`.                                                                                                |
-| `prompt`                   | string             | —                             | Inline prompt (mutually exclusive with `promptFile`)                                                                                                                                                                         |
-| `promptFile`               | string             | —                             | Path to prompt file (mutually exclusive with `prompt`). Resolves against `process.cwd()`, **not** `cwd`.                                                                                                                     |
-| `maxIterations`            | number             | `1`                           | Maximum iterations to run                                                                                                                                                                                                    |
-| `hooks`                    | SandboxHooks       | —                             | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                                                                                                                      |
-| `name`                     | string             | —                             | Display name for the run, shown as a prefix in log output                                                                                                                                                                    |
-| `promptArgs`               | PromptArgs         | —                             | Key-value map for `{{KEY}}` placeholder substitution                                                                                                                                                                         |
-| `branchStrategy`           | BranchStrategy     | per-provider default          | Branch strategy: `{ type: 'head' }`, `{ type: 'merge-to-head' }`, or `{ type: 'branch', branch: '…' }`                                                                                                                       |
-| `copyToWorktree`           | string[]           | —                             | Host-relative file paths to copy into the sandbox before start (not supported with `branchStrategy: { type: 'head' }`)                                                                                                       |
-| `logging`                  | object             | file (auto-generated)         | `{ type: 'file', path }` or `{ type: 'stdout' }`                                                                                                                                                                             |
-| `completionSignal`         | string \| string[] | `<promise>COMPLETE</promise>` | String or array of strings the agent emits to stop the iteration loop early                                                                                                                                                  |
-| `idleTimeoutSeconds`       | number             | `600`                         | Idle timeout in seconds — resets on each agent output event                                                                                                                                                                  |
-| `completionTimeoutSeconds` | number             | `60`                          | Grace window in seconds after the completion signal is observed but the agent process has not exited (hanging process). See [Hanging processes after the completion signal](#hanging-processes-after-the-completion-signal). |
-| `resumeSession`            | string             | —                             | Resume a prior session by ID for agents that support resume. Incompatible with `maxIterations > 1`. Session file must exist on host.                                                                                         |
-| `signal`                   | AbortSignal        | —                             | Cancel the run when aborted. Kills the in-flight agent subprocess and cancels lifecycle hooks; the worktree is preserved on disk. Rejects with `signal.reason`.                                                              |
-| `timeouts`                 | Timeouts           | —                             | Override default timeouts for built-in lifecycle steps: `copyToWorktreeMs` (60 000), `gitSetupMs` (10 000), `commitCollectionMs` (30 000), `mergeToHostMs` (30 000).                                                         |
-| `output`                   | OutputDefinition   | —                             | Structured output definition (`Output.object(…)` or `Output.string(…)`). Requires `maxIterations === 1`. See [Structured output](#structured-output).                                                                        |
+| 选项                       | 类型               | 默认值                        | 说明                                                                                 |
+| -------------------------- | ------------------ | ----------------------------- | ------------------------------------------------------------------------------------ |
+| `agent`                    | AgentProvider      | —                             | **必填。** 代理提供商（如 `claudeCode(...)`、`codex(...)`、`cursor(...)` 等）        |
+| `sandbox`                  | SandboxProvider    | —                             | **必填。** 沙箱提供商                                                                |
+| `cwd`                      | string             | `process.cwd()`               | 宿主机仓库目录——`.sandcastle/` 产物与 git 操作的锚点                                 |
+| `stateDir`                 | string             | 用户缓存目录                  | Sandcastle 状态根：`.env`、日志、worktree 与 patches                                 |
+| `prompt`                   | string             | —                             | 内联提示词（与 `promptFile` 互斥）                                                   |
+| `promptFile`               | string             | —                             | 提示词文件路径。相对 `process.cwd()`，**非** `cwd`                                   |
+| `maxIterations`            | number             | `1`                           | 最大迭代次数                                                                         |
+| `hooks`                    | SandboxHooks       | —                             | 生命周期钩子（`host.*`、`sandbox.*`）                                                |
+| `name`                     | string             | —                             | 运行显示名                                                                           |
+| `promptArgs`               | PromptArgs         | —                             | `{{KEY}}` 占位符替换                                                                 |
+| `branchStrategy`           | BranchStrategy     | 按提供商默认                  | `{ type: 'head' }`、`{ type: 'merge-to-head' }` 或 `{ type: 'branch', branch: '…' }` |
+| `copyToWorktree`           | string[]           | —                             | 启动前复制进沙箱的文件路径（不支持 `head` 策略）                                     |
+| `logging`                  | object             | file（自动生成）              | `{ type: 'file', path }` 或 `{ type: 'stdout' }`                                     |
+| `completionSignal`         | string \| string[] | `<promise>COMPLETE</promise>` | 提前结束迭代的完成信号                                                               |
+| `idleTimeoutSeconds`       | number             | `600`                         | 空闲超时（秒）                                                                       |
+| `completionTimeoutSeconds` | number             | `60`                          | 完成信号后挂起进程的宽限窗口。见[挂起进程](#完成信号后的挂起进程)                    |
+| `resumeSession`            | string             | —                             | 恢复先前会话。与 `maxIterations > 1` 不兼容                                          |
+| `signal`                   | AbortSignal        | —                             | 中止时取消运行；worktree 保留                                                        |
+| `timeouts`                 | Timeouts           | —                             | 覆盖内置生命周期超时                                                                 |
+| `output`                   | OutputDefinition   | —                             | 结构化输出定义。要求 `maxIterations === 1`。见[结构化输出](#结构化输出)              |
 
 ### `RunResult`
 
-| Field              | Type                | Description                                                        |
-| ------------------ | ------------------- | ------------------------------------------------------------------ |
-| `iterations`       | `IterationResult[]` | Per-iteration results (use `.length` for the count)                |
-| `completionSignal` | string?             | The matched completion signal string, or `undefined` if none fired |
-| `stdout`           | string              | Agent output                                                       |
-| `commits`          | `{ sha }[]`         | Commits created during the run                                     |
-| `branch`           | string              | Target branch name                                                 |
-| `logFilePath`      | string?             | Path to the log file (only when logging to a file)                 |
-| `output`           | T?                  | Typed structured output (only present when `output` option is set) |
+| 字段               | 类型                | 说明                                       |
+| ------------------ | ------------------- | ------------------------------------------ |
+| `iterations`       | `IterationResult[]` | 每轮迭代结果                               |
+| `completionSignal` | string?             | 匹配到的完成信号，未触发则为 undefined     |
+| `stdout`           | string              | 代理输出                                   |
+| `commits`          | `{ sha }[]`         | 运行期间创建的提交                         |
+| `branch`           | string              | 目标分支名                                 |
+| `logFilePath`      | string?             | 日志文件路径（仅文件日志）                 |
+| `output`           | T?                  | 类型化结构化输出（仅设置 `output` 选项时） |
 
 ### `IterationResult`
 
-| Field             | Type              | Description                                                                                                                         |
-| ----------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `sessionId`       | string?           | Agent session ID from the provider stream, or `undefined` if the provider does not emit one                                         |
-| `sessionFilePath` | string?           | Absolute host path to the captured session JSONL, or `undefined` when capture is off                                                |
-| `usage`           | `IterationUsage`? | Token usage snapshot from the last assistant message, or `undefined` when capture is off or provider does not support usage parsing |
+| 字段              | 类型              | 说明                                  |
+| ----------------- | ----------------- | ------------------------------------- |
+| `sessionId`       | string?           | 提供商流中的会话 ID，无则为 undefined |
+| `sessionFilePath` | string?           | 已捕获会话 JSONL 的宿主机绝对路径     |
+| `usage`           | `IterationUsage`? | 最后一条助手消息的 token 用量快照     |
 
 ### `IterationUsage`
 
-| Field                      | Type   | Description                                |
-| -------------------------- | ------ | ------------------------------------------ |
-| `inputTokens`              | number | Input tokens consumed                      |
-| `cacheCreationInputTokens` | number | Tokens used to create prompt cache entries |
-| `cacheReadInputTokens`     | number | Tokens read from prompt cache              |
-| `outputTokens`             | number | Output tokens generated                    |
+| 字段                       | 类型   | 说明                   |
+| -------------------------- | ------ | ---------------------- |
+| `inputTokens`              | number | 消耗的输入 token       |
+| `cacheCreationInputTokens` | number | 创建提示缓存的 token   |
+| `cacheReadInputTokens`     | number | 从提示缓存读取的 token |
+| `outputTokens`             | number | 生成的输出 token       |
 
-### Session capture
+### 会话捕获
 
-After each resumable provider iteration, Sandcastle automatically captures the agent's session file from the sandbox to the host. Claude Code sessions are stored under `~/.claude/projects/<encoded-path>/<session-id>.jsonl`; Codex sessions are stored under `~/.codex/sessions/YYYY/MM/DD/rollout-*-<session-id>.jsonl`; Pi sessions are stored under `~/.pi/agent/sessions/--<encoded-cwd>--/<timestamp>_<session-id>.jsonl`. Any provider-specific `cwd` fields are rewritten to match the host repo root, so the provider's native resume command works.
+每个可恢复提供商迭代后，Sandcastle 自动将代理会话文件从沙箱捕获到宿主机。Claude Code：`~/.claude/projects/<encoded-path>/<session-id>.jsonl`；Codex：`~/.codex/sessions/YYYY/MM/DD/rollout-*-<session-id>.jsonl`；Pi：`~/.pi/agent/sessions/--<encoded-cwd>--/<timestamp>_<session-id>.jsonl`。提供商专属的 `cwd` 字段会改写为宿主机仓库根，以便原生恢复命令可用。
 
-For Claude Code, any `Agent`-tool or `Workflow`-tool subagent transcripts written under `<session-id>/subagents/agent-*.jsonl` are captured alongside the main session. Subagent capture is best-effort: a failure on an individual transcript logs a warning and lets siblings and the main session through. Main-session capture failure still fails the run (see below).
+Claude Code 下，`<session-id>/subagents/agent-*.jsonl` 中的子代理转录会尽力与主会话一并捕获；单条失败仅警告，主会话捕获失败仍导致运行失败。
 
-Session capture is enabled by default for `claudeCode()`, `codex()`, and `pi()` and can be opted out via `captureSessions: false`. Providers without `sessionStorage` do not attempt capture. Capture failure fails the run.
+`claudeCode()`、`codex()`、`pi()` 默认启用，可通过 `captureSessions: false` 关闭。无 `sessionStorage` 的提供商不尝试捕获。
 
-### Session resume
+### 会话恢复
 
-Pass `resumeSession` to `run()` to continue a prior Claude Code, Codex, or Pi conversation inside a new sandbox:
+向 `run()` 传入 `resumeSession`，在新沙箱内继续先前的 Claude Code、Codex 或 Pi 对话：
 
 ```typescript
 const result = await run({
   agent: claudeCode("claude-opus-4-8"),
   sandbox: docker(),
-  prompt: "Continue where you left off",
+  prompt: "从上次停下的地方继续",
   resumeSession: "abc-123-def",
 });
 ```
 
-You can also continue the last captured session from a result:
+也可从结果继续最后捕获的会话：
 
 ```typescript
 const first = await run({
   agent: codex("gpt-5.4"),
   sandbox: docker(),
-  prompt: "Draft a plan",
+  prompt: "起草计划",
 });
 
-const second = await first.resume?.("Now implement the plan");
+const second = await first.resume?.("现在实现该计划");
 ```
 
-`resume` is present only on results from resumable providers (Claude Code, Codex, Pi) — hence the optional-chaining call.
+`resume` 仅存在于可恢复提供商的结果上——故使用可选链。
 
-Before the sandbox starts, Sandcastle validates that the session file exists on the host and transfers it into the sandbox with `cwd` fields rewritten to match the sandbox-side path. Claude Code receives `--resume <id>`; Codex receives `codex exec resume <id>` with the prompt piped over stdin; Pi receives `--session <id>`.
+沙箱启动前，Sandcastle 校验宿主机会话文件存在，并将其传入沙箱且改写 `cwd`。Claude Code 收到 `--resume <id>`；Codex 收到 `codex exec resume <id>` 且提示词经 stdin 管道；Pi 收到 `--session <id>`。
 
-Constraints:
+约束：
 
-- `resumeSession` is incompatible with `maxIterations > 1` (throws before sandbox creation).
-- The provider's host session file must exist (throws before sandbox creation).
-- Only iteration 1 receives the resume flag; subsequent iterations (if any) start fresh.
-- Providers without resume support reject `resumeSession`.
+- `resumeSession` 与 `maxIterations > 1` 不兼容（沙箱创建前抛出）。
+- 提供商宿主机会话文件必须存在。
+- 仅第 1 轮迭代带恢复标志；后续迭代（若有）重新开始。
+- 不支持恢复的提供商会拒绝 `resumeSession`。
 
-### Session fork
+### 会话分叉
 
-`RunResult.fork(prompt, options?)` is the sibling of `.resume()`: it continues from the last captured session but leaves the parent session JSONL untouched and writes the child under a new session id. The mechanism is the agent's native fork flag — `claude --resume <id> --fork-session` for Claude Code, `codex exec fork <id>` for Codex.
+`RunResult.fork(prompt, options?)` 是 `.resume()` 的兄弟：从最后捕获的会话继续，但父会话 JSONL 不动，子会话写入新 id。机制为代理原生分叉标志——Claude Code 为 `claude --resume <id> --fork-session`，Codex 为 `codex exec fork <id>`。
 
-Fork enables fan-out workflows where a single parent run is the starting point for several independent children:
+分叉支持单次父运行扇出为多个独立子运行：
 
 ```typescript
 const parent = await run({
   agent: claudeCode("claude-opus-4-8"),
   sandbox: docker(),
-  prompt: "Read the codebase and summarise the data model",
+  prompt: "阅读代码库并总结数据模型",
 });
 
 const [reviewA, reviewB] = await Promise.all([
-  parent.fork?.("Review the migration plan", {
+  parent.fork?.("审查迁移计划", {
     branchStrategy: { type: "branch", branch: "review-a" },
   }),
-  parent.fork?.("Audit the auth layer", {
+  parent.fork?.("审计鉴权层", {
     branchStrategy: { type: "branch", branch: "review-b" },
   }),
 ]);
 ```
 
-**Fork is session-only.** `--fork-session` and `codex exec fork` isolate the agent session JSONL — they do **not** isolate the branch, worktree, or sandbox. Safe concurrent fan-out (`Promise.all([r.fork(a), r.fork(b)])`) requires the caller to give each child a distinct `branch` via `branchStrategy: { type: "branch", branch: "..." }`. The default `head` and `merge-to-head` strategies are **not** safe for concurrent forks: `head` shares the host working directory across all children, and `merge-to-head` races `git merge` against the same HEAD. See [ADR 0018](docs/adr/0018-fork-is-session-only.md).
+**分叉仅隔离会话。** `--fork-session` 与 `codex exec fork` 只隔离代理会话 JSONL——**不**隔离分支、worktree 或沙箱。安全并发扇出（`Promise.all([r.fork(a), r.fork(b)])`）要求调用方为每个子运行通过 `branchStrategy: { type: "branch", branch: "..." }` 指定不同分支。默认 `head` 与 `merge-to-head` **不**适合并发分叉：`head` 共享宿主机工作目录，`merge-to-head` 对同一 HEAD 竞态 `git merge`。见 [ADR 0018](docs/adr/0018-fork-is-session-only.md)。
 
-`fork` is present only on results from providers with `sessionStorage` (Claude Code, Codex) — hence the optional-chaining call. The same single-iteration and session-file constraints as `.resume()` apply.
+`fork` 仅存在于带 `sessionStorage` 的提供商结果上。与 `.resume()` 相同的单迭代与会话文件约束适用。
 
 ### `ClaudeCodeOptions`
 
-The `claudeCode()` factory accepts an optional second argument for provider-specific options:
+`claudeCode()` 工厂可选第二参数：
 
 ```typescript
 agent: claudeCode("claude-opus-4-8", { effort: "high" });
 ```
 
-| Option            | Type                                                                                           | Default | Description                                                                                                                                                                                         |
-| ----------------- | ---------------------------------------------------------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `effort`          | `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"`                                      | —       | Claude Code reasoning effort level (`max` is Opus only)                                                                                                                                             |
-| `env`             | `Record<string, string>`                                                                       | `{}`    | Environment variables injected by this agent provider                                                                                                                                               |
-| `captureSessions` | `boolean`                                                                                      | `true`  | Capture agent session JSONL to host for `claude --resume`                                                                                                                                           |
-| `permissionMode`  | `"default"` \| `"acceptEdits"` \| `"plan"` \| `"auto"` \| `"dontAsk"` \| `"bypassPermissions"` | —       | Maps to Claude's `--permission-mode` flag. When set, replaces Sandcastle's default `--dangerously-skip-permissions` on AFK runs. Use `"auto"` for AI-mediated per-tool approve/deny without bypass. |
+| 选项              | 类型                                                                                           | 默认值 | 说明                                                                                        |
+| ----------------- | ---------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------- |
+| `effort`          | `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"`                                      | —      | Claude Code 推理力度（`max` 仅 Opus）                                                       |
+| `env`             | `Record<string, string>`                                                                       | `{}`   | 本代理提供商注入的环境变量                                                                  |
+| `captureSessions` | `boolean`                                                                                      | `true` | 捕获会话 JSONL 到宿主机以供 `claude --resume`                                               |
+| `permissionMode`  | `"default"` \| `"acceptEdits"` \| `"plan"` \| `"auto"` \| `"dontAsk"` \| `"bypassPermissions"` | —      | 映射 Claude `--permission-mode`。设置后替换 AFK 运行默认的 `--dangerously-skip-permissions` |
 
 ### `CodexOptions`
 
-The `codex()` factory accepts an optional second argument for provider-specific options:
+`codex()` 工厂可选第二参数：
 
 ```typescript
 agent: codex("gpt-5.4", { effort: "high" });
 ```
 
-| Option              | Type                                           | Default | Description                                                                                                                                                                                                           |
-| ------------------- | ---------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `effort`            | `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` | —       | Codex reasoning effort level via `model_reasoning_effort`                                                                                                                                                             |
-| `env`               | `Record<string, string>`                       | `{}`    | Environment variables injected by this agent provider                                                                                                                                                                 |
-| `captureSessions`   | `boolean`                                      | `true`  | Capture Codex rollout JSONL to host for resume                                                                                                                                                                        |
-| `approvalsReviewer` | `"user"` \| `"auto_review"`                    | —       | Maps to Codex's `approvals_reviewer` config. When `"auto_review"`, swaps `--dangerously-bypass-approvals-and-sandbox` for `-a on-request -s danger-full-access` so the reviewer agent evaluates each approval prompt. |
+| 选项                | 类型                                           | 默认值 | 说明                                                                          |
+| ------------------- | ---------------------------------------------- | ------ | ----------------------------------------------------------------------------- |
+| `effort`            | `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` | —      | 通过 `model_reasoning_effort` 设置 Codex 推理力度                             |
+| `env`               | `Record<string, string>`                       | `{}`   | 本代理提供商注入的环境变量                                                    |
+| `captureSessions`   | `boolean`                                      | `true` | 捕获 Codex rollout JSONL 以供恢复                                             |
+| `approvalsReviewer` | `"user"` \| `"auto_review"`                    | —      | 映射 Codex `approvals_reviewer`。`"auto_review"` 时用审查代理评估每次批准提示 |
 
 ### `PiOptions`
 
-The `pi()` factory accepts an optional second argument for provider-specific options:
+`pi()` 工厂可选第二参数：
 
 ```typescript
 agent: pi("claude-sonnet-4-6", { thinking: "high" });
 ```
 
-| Option            | Type                                                                     | Default | Description                                              |
-| ----------------- | ------------------------------------------------------------------------ | ------- | -------------------------------------------------------- |
-| `thinking`        | `"off"` \| `"minimal"` \| `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` | —       | Pi reasoning effort level via the `--thinking` flag      |
-| `env`             | `Record<string, string>`                                                 | `{}`    | Environment variables injected by this agent provider    |
-| `captureSessions` | `boolean`                                                                | `true`  | Capture pi session JSONL to host for `pi --session <id>` |
+| 选项              | 类型                                                                     | 默认值 | 说明                                        |
+| ----------------- | ------------------------------------------------------------------------ | ------ | ------------------------------------------- |
+| `thinking`        | `"off"` \| `"minimal"` \| `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` | —      | 通过 `--thinking` 设置 Pi 推理力度          |
+| `env`             | `Record<string, string>`                                                 | `{}`   | 本代理提供商注入的环境变量                  |
+| `captureSessions` | `boolean`                                                                | `true` | 捕获 pi 会话 JSONL 以供 `pi --session <id>` |
 
-### Provider `env`
+### 提供商 `env`
 
-Both **agent providers** and **sandbox providers** accept an optional `env: Record<string, string>` in their options. These environment variables are merged with the `.sandcastle/.env` resolver output at launch time:
+**代理提供商** 与 **沙箱提供商** 均可在选项中传入 `env: Record<string, string>`，启动时与 `.sandcastle/.env` 解析结果合并：
 
 ```typescript
 await run({
@@ -1009,41 +1103,41 @@ await run({
   sandbox: docker({
     env: { DOCKER_SPECIFIC_VAR: "value" },
   }),
-  prompt: "Fix issue #42",
+  prompt: "修复 issue #42",
 });
 ```
 
-**Merge rules:**
+**合并规则：**
 
-- Provider env (agent + sandbox) overrides `.sandcastle/.env` resolver output for shared keys
-- Agent provider env and sandbox provider env **must not overlap** — if they share any key, `run()` throws an error
-- When `env` is not provided, it defaults to `{}`
+- 提供商 env（代理 + 沙箱）覆盖 `.sandcastle/.env` 解析结果中的同名键
+- 代理与沙箱提供商 env **不得重叠**——同名键会导致 `run()` 抛出
+- 未提供 `env` 时默认为 `{}`
 
-Environment variables are also resolved automatically from `.sandcastle/.env` and `process.env` — no need to pass them to the API. The required variables depend on the **agent provider** (see `sandcastle init` output for details).
+环境变量也会自动从 `.sandcastle/.env` 与 `process.env` 解析——无需在 API 中重复传入。所需变量取决于 **代理提供商**（见 `sandcastle init` 输出）。
 
-## Custom Sandbox Providers
+## 自定义沙箱提供商
 
-Sandcastle ships with built-in providers for Docker, Podman, and Vercel, but you can create your own. A sandbox provider tells Sandcastle how to execute commands in an isolated environment. There are two kinds:
+Sandcastle 内置 Docker、Podman、Vercel，也可自行实现。沙箱提供商告诉 Sandcastle 如何在隔离环境中执行命令。两类：
 
-- **Bind-mount** — the sandbox can mount a host directory. Sandcastle creates a worktree on the host and the provider mounts it in. No file sync needed. Use this for Docker, Podman, or any local container runtime.
-- **Isolated** — the sandbox has its own filesystem (e.g. a cloud VM). The provider handles syncing code in and out via `copyIn` and `copyFileOut`. Use this when the sandbox cannot access the host filesystem.
+- **绑定挂载**——沙箱可挂载宿主机目录。Sandcastle 在宿主机创建 worktree，提供商挂载进去。无需文件同步。适用于 Docker、Podman 等本地容器运行时。
+- **隔离**——沙箱自有文件系统（如云端 VM）。提供商通过 `copyIn` 与 `copyFileOut` 同步代码。适用于无法访问宿主机文件系统的场景。
 
-### The sandbox handle contract
+### 沙箱句柄约定
 
-Both provider types return a **sandbox handle** from their `create()` function. The handle exposes:
+两类提供商的 `create()` 均返回 **沙箱句柄**，暴露：
 
-| Method         | Required   | Description                                                                  |
-| -------------- | ---------- | ---------------------------------------------------------------------------- |
-| `exec`         | Both       | Run a command, optionally streaming stdout line-by-line via `options.onLine` |
-| `close`        | Both       | Tear down the sandbox                                                        |
-| `copyFileIn`   | Bind-mount | Copy a single file from the host into the sandbox                            |
-| `copyFileOut`  | Both       | Copy a single file from the sandbox to the host                              |
-| `copyIn`       | Isolated   | Copy a file or directory from the host into the sandbox                      |
-| `worktreePath` | Both       | Absolute path to the repo directory inside the sandbox                       |
+| 方法           | 必填     | 说明                                                |
+| -------------- | -------- | --------------------------------------------------- |
+| `exec`         | 两者     | 执行命令，可选通过 `options.onLine` 逐行流式 stdout |
+| `close`        | 两者     | 销毁沙箱                                            |
+| `copyFileIn`   | 绑定挂载 | 从宿主机复制单个文件进沙箱                          |
+| `copyFileOut`  | 两者     | 从沙箱复制单个文件到宿主机                          |
+| `copyIn`       | 隔离     | 从宿主机复制文件或目录进沙箱                        |
+| `worktreePath` | 两者     | 沙箱内仓库目录的绝对路径                            |
 
 ### `ExecResult`
 
-Every `exec` call returns an `ExecResult`:
+每次 `exec` 返回 `ExecResult`：
 
 ```typescript
 interface ExecResult {
@@ -1053,9 +1147,9 @@ interface ExecResult {
 }
 ```
 
-### Bind-mount provider example
+### 绑定挂载提供商示例
 
-A minimal bind-mount provider that shells out to local processes (no container):
+最小绑定挂载提供商，通过本地进程执行（无容器）：
 
 ```typescript
 import {
@@ -1063,7 +1157,7 @@ import {
   type BindMountCreateOptions,
   type BindMountSandboxHandle,
   type ExecResult,
-} from "@ai-hero/sandcastle";
+} from "@yogioo/sandcastle";
 import { execFile, spawn } from "node:child_process";
 import { copyFile as fsCopyFile, mkdir as fsMkdir } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -1098,7 +1192,7 @@ const localProcess = () =>
               const rl = createInterface({ input: proc.stdout! });
               rl.on("line", (line) => {
                 stdoutChunks.push(line);
-                onLine(line); // forward each line to Sandcastle
+                onLine(line); // 将每行转发给 Sandcastle
               });
 
               proc.stderr!.on("data", (chunk: Buffer) => {
@@ -1147,23 +1241,23 @@ const localProcess = () =>
         },
 
         close: async () => {
-          // nothing to tear down for a local process
+          // 本地进程无需销毁
         },
       };
     },
   });
 ```
 
-### Isolated provider example
+### 隔离提供商示例
 
-A minimal isolated provider using a temp directory:
+使用临时目录的最小隔离提供商：
 
 ```typescript
 import {
   createIsolatedSandboxProvider,
   type IsolatedSandboxHandle,
   type ExecResult,
-} from "@ai-hero/sandcastle";
+} from "@yogioo/sandcastle";
 import { execFile, spawn } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1260,41 +1354,41 @@ const tempDir = () =>
   });
 ```
 
-### Branch strategies
+### 分支策略
 
-A branch strategy controls where the agent's commits land. Configure it when constructing the provider:
+分支策略控制代理提交落在何处。在 `run()` 上配置：
 
-| Strategy        | Behavior                                                                 | Bind-mount | Isolated  |
-| --------------- | ------------------------------------------------------------------------ | ---------- | --------- |
-| `head`          | Agent writes directly to the host working directory. No worktree created | Default    | N/A       |
-| `merge-to-head` | Sandcastle creates a temp branch, merges back to HEAD when done          | Supported  | Default   |
-| `branch`        | Commits land on an explicit named branch you provide                     | Supported  | Supported |
+| 策略            | 行为                                  | 绑定挂载 | 隔离   |
+| --------------- | ------------------------------------- | -------- | ------ |
+| `head`          | 直接写宿主机工作目录。不创建 worktree | 默认     | 不适用 |
+| `merge-to-head` | 临时分支工作，完成后合并回 HEAD       | 支持     | 默认   |
+| `branch`        | 提交落在显式命名分支                  | 支持     | 支持   |
 
-**When to use each:**
+**选用建议：**
 
-- **`head`** — fast iteration during development. No branch indirection, no merge step. Only works with bind-mount providers since the agent needs direct host filesystem access.
-- **`merge-to-head`** — safe default for automation. The agent works on a throwaway branch; if something goes wrong, HEAD is untouched. Use this for CI or unattended runs.
-- **`branch`** — when you want commits on a specific branch (e.g. for a PR). Pass `{ type: "branch", branch: "agent/fix-42" }`.
+- **`head`**——开发时快速迭代。无分支间接、无合并。仅绑定挂载提供商（需直接访问宿主机文件系统）。
+- **`merge-to-head`**——自动化安全默认。代理在临时分支工作；出错时 HEAD 不受影响。适合 CI 或无人值守运行。
+- **`branch`**——需要特定分支上的提交（如 PR）。传入 `{ type: "branch", branch: "agent/fix-42" }`。
 
-Branch strategy is now configured on `run()`, not on the provider:
+分支策略现配置在 `run()` 上，而非提供商上：
 
 ```typescript
-import { run, claudeCode } from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { run, claudeCode } from "@yogioo/sandcastle";
+import { docker } from "@yogioo/sandcastle/sandboxes/docker";
 
-// head — direct write, bind-mount only (default for bind-mount providers)
+// head——直接写入，仅绑定挂载（绑定挂载提供商默认）
 await run({
   agent: claudeCode("claude-opus-4-8"),
   sandbox: docker(),
   prompt: "…",
 });
-// merge-to-head — temp branch, merge back (default for isolated providers)
+// merge-to-head——临时分支，合并回去（隔离提供商默认）
 await run({
   agent: claudeCode("claude-opus-4-8"),
   sandbox: tempDir(),
   prompt: "…",
 });
-// branch — explicit named branch
+// branch——显式命名分支
 await run({
   agent: claudeCode("claude-opus-4-8"),
   sandbox: docker(),
@@ -1303,57 +1397,56 @@ await run({
 });
 ```
 
-### Passing to `run()`
+### 传给 `run()`
 
-Pass your custom provider via the `sandbox` option — it works the same as the built-in `docker()` provider:
+通过 `sandbox` 选项传入自定义提供商——与内置 `docker()` 用法相同：
 
 ```typescript
-import { run, claudeCode } from "@ai-hero/sandcastle";
+import { run, claudeCode } from "@yogioo/sandcastle";
 
 const result = await run({
   agent: claudeCode("claude-opus-4-8"),
-  sandbox: localProcess(), // your custom provider
-  prompt: "Fix issue #42 in this repo.",
+  sandbox: localProcess(), // 你的自定义提供商
+  prompt: "修复本仓库 issue #42。",
 });
 ```
 
-### Reference implementations
+### 参考实现
 
-For real-world examples, see:
+- [`src/sandboxes/docker.ts`](src/sandboxes/docker.ts)——Docker 绑定挂载（含 SELinux 标签）
+- [`src/sandboxes/vercel.ts`](src/sandboxes/vercel.ts)——Vercel Firecracker 隔离提供商
+- [`src/sandboxes/podman.ts`](src/sandboxes/podman.ts)——Podman 绑定挂载
+- [`src/sandboxes/test-isolated.ts`](src/sandboxes/test-isolated.ts)——临时目录隔离（测试用）
 
-- [`src/sandboxes/docker.ts`](src/sandboxes/docker.ts) — bind-mount provider using Docker containers (with SELinux label support)
-- [`src/sandboxes/vercel.ts`](src/sandboxes/vercel.ts) — isolated provider using Vercel Firecracker microVMs via `@vercel/sandbox`
-- [`src/sandboxes/podman.ts`](src/sandboxes/podman.ts) — bind-mount provider using Podman containers (with SELinux label support)
-- [`src/sandboxes/test-isolated.ts`](src/sandboxes/test-isolated.ts) — isolated provider using temp directories (used in tests)
+## 配置
 
-## Configuration
+### 状态目录（`.sandcastle/`）
 
-### Config directory (`.sandcastle/`)
+每个项目的 Sandcastle 工作流与运行时状态均在外部 `.sandcastle/` 状态目录。
+`sandcastle init` 默认在用户缓存中创建；`--state-dir` 可显式指定其他位置。CLI 只运行带有有效外部项目清单的状态目录，不会自动消费仓库内的旧 `.sandcastle`。
 
-All per-repo sandbox configuration lives in `.sandcastle/`. Run `sandcastle init` to create it.
+### 自定义 Dockerfile
 
-### Custom Dockerfile
+状态目录中的 `Dockerfile` 控制沙箱环境。默认模板安装：
 
-The `.sandcastle/Dockerfile` controls the sandbox environment. The default template installs:
-
-- **Node.js 22** (base image)
-- **git**, **curl**, **jq** (system dependencies)
-- **GitHub CLI** (`gh`)
+- **Node.js 22**（基础镜像）
+- **git**、**curl**、**jq**（系统依赖）
+- **GitHub CLI**（`gh`）
 - **Claude Code CLI**
-- A non-root `agent` user (required — Claude runs as this user)
+- 非 root 用户 `agent`（必需——Claude 以此用户运行）
 
-When customizing the Dockerfile, ensure you keep:
+自定义 Dockerfile 时请保留：
 
-- A non-root user (the default `agent` user) for Claude to run as
-- `git` (required for commits and branch operations)
-- `gh` (required for issue fetching)
-- Claude Code CLI installed and on PATH
+- 非 root 用户（默认 `agent`）
+- `git`（提交与分支操作）
+- `gh`（拉取 issue）
+- Claude Code CLI 已安装且在 PATH 中
 
-Add your project-specific dependencies (e.g., language runtimes, build tools) to the Dockerfile as needed.
+按需添加项目依赖（语言运行时、构建工具等）。
 
-### Hooks
+### 钩子
 
-Hooks are grouped by **where** they run — `host` (on the developer's machine) or `sandbox` (inside the container):
+钩子按 **运行位置** 分组——`host`（开发者机器）或 `sandbox`（容器内）：
 
 ```ts
 hooks: {
@@ -1370,30 +1463,30 @@ hooks: {
 }
 ```
 
-| Hook                     | Runs on | When                                         | Working directory                           |
-| ------------------------ | ------- | -------------------------------------------- | ------------------------------------------- |
-| `host.onWorktreeReady`   | Host    | After `copyToWorktree`, before sandbox start | Worktree path (host repo root under `head`) |
-| `host.onSandboxReady`    | Host    | After sandbox is up                          | Worktree path (host repo root under `head`) |
-| `sandbox.onSandboxReady` | Sandbox | After sandbox is up                          | Sandbox repo directory                      |
+| 钩子                     | 运行于 | 时机                              | 工作目录                                 |
+| ------------------------ | ------ | --------------------------------- | ---------------------------------------- |
+| `host.onWorktreeReady`   | 宿主机 | `copyToWorktree` 之后、沙箱启动前 | worktree 路径（`head` 下为宿主机仓库根） |
+| `host.onSandboxReady`    | 宿主机 | 沙箱就绪后                        | worktree 路径                            |
+| `sandbox.onSandboxReady` | 沙箱   | 沙箱就绪后                        | 沙箱仓库目录                             |
 
-**Ordering:** `copyToWorktree` -> `host.onWorktreeReady` (sequential) -> sandbox created -> `host.onSandboxReady` + `sandbox.onSandboxReady` (parallel).
+**顺序：** `copyToWorktree` → `host.onWorktreeReady`（顺序）→ 创建沙箱 → `host.onSandboxReady` 与 `sandbox.onSandboxReady`（并行）。
 
-- **Host hooks** accept `{ command: string; timeoutMs?: number }` — no `sudo`, no `cwd`. Use `cd` or inline env in the command string.
-- **Sandbox hooks** accept `{ command: string; sudo?: boolean; timeoutMs?: number }` — set `sudo: true` for elevated privileges.
-- **`timeoutMs`** overrides the default 60 s per-hook timeout. Useful for long-running setup commands like dependency installs (e.g. `timeoutMs: 300_000` for 5 minutes).
-- Within each hook point, sandbox hooks run in parallel; host hooks within `onSandboxReady` also run in parallel with sandbox hooks. `host.onWorktreeReady` hooks run sequentially in declared order.
-- If any hook exits non-zero, setup fails fast.
-- When a `signal` is passed to `run()`, it is threaded to all hooks — aborting the signal cancels any in-flight hook commands.
+- **宿主机钩子** 接受 `{ command: string; timeoutMs?: number }`——无 `sudo`、无 `cwd`。在命令字符串中用 `cd` 或内联环境变量。
+- **沙箱钩子** 接受 `{ command: string; sudo?: boolean; timeoutMs?: number }`——`sudo: true` 提权。
+- **`timeoutMs`** 覆盖默认每钩子 60 秒超时。长耗时安装可设如 `timeoutMs: 300_000`（5 分钟）。
+- 同一点内沙箱钩子并行；`onSandboxReady` 的宿主机钩子与沙箱钩子并行。`host.onWorktreeReady` 按声明顺序顺序执行。
+- 任一脚本非零退出则快速失败。
+- 向 `run()` 传入 `signal` 时，会传递给所有钩子——中止信号会取消进行中的钩子命令。
 
-## Development
+## 开发
 
 ```bash
 npm install
-npm run build    # Bundle with tsup
-npm test         # Run tests with vitest
-npm run typecheck # Type-check
+npm run build    # 使用 tsup 打包
+npm test         # 使用 vitest 运行测试
+npm run typecheck # 类型检查
 ```
 
-## License
+## 许可证
 
 MIT

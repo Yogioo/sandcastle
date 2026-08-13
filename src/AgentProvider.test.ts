@@ -674,10 +674,16 @@ describe("codex factory", () => {
     expect(stdin).toBe("it's a test");
   });
 
-  it("buildPrintCommand shell-escapes the model", () => {
+  it("buildPrintCommand leaves a safe model identifier unquoted", () => {
     const provider = codex("gpt-5.4-mini");
     const { command } = provider.buildPrintCommand(opts("do something"));
-    expect(command).toContain("-m 'gpt-5.4-mini'");
+    expect(command).toContain("-m gpt-5.4-mini");
+  });
+
+  it("buildPrintCommand shell-escapes an unsafe model identifier", () => {
+    const provider = codex("model; rm -rf /");
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("-m 'model; rm -rf /'");
   });
 
   it("buildPrintCommand includes model reasoning effort config when specified", () => {
@@ -695,7 +701,7 @@ describe("codex factory", () => {
     });
     expect(command).toContain("codex exec resume 'abc-123'");
     expect(command).toContain("--json");
-    expect(command).toContain("-m 'gpt-5.4-mini'");
+    expect(command).toContain("-m gpt-5.4-mini");
     expect(command).toContain(`-c 'model_reasoning_effort="high"'`);
     expect(command.endsWith(" -")).toBe(true);
     expect(stdin).toBe("continue");
@@ -712,7 +718,7 @@ describe("codex factory", () => {
     expect(command).toContain("codex exec fork 'abc-123'");
     expect(command).not.toContain("codex exec resume");
     expect(command).toContain("--json");
-    expect(command).toContain("-m 'gpt-5.4-mini'");
+    expect(command).toContain("-m gpt-5.4-mini");
     expect(command.endsWith(" -")).toBe(true);
     expect(stdin).toBe("branch off");
   });
@@ -739,6 +745,7 @@ describe("codex factory", () => {
     expect(command).toContain("codex exec --json");
     expect(command).not.toContain("codex exec fork");
     expect(command).not.toContain("codex exec resume");
+    expect(command).toMatch(/ -$/);
   });
 
   it("buildPrintCommand omits model reasoning effort config when not specified", () => {

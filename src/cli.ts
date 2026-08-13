@@ -1,9 +1,10 @@
-import { Command, Options } from "@effect/cli";
+import { Args, Command, Options } from "@effect/cli";
 import { FileSystem } from "@effect/platform";
 import { Effect, Option } from "effect";
 import * as clack from "@clack/prompts";
 import { execSync } from "node:child_process";
-import { join } from "node:path";
+import { statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { styleText } from "node:util";
 
 import { Display } from "./Display.js";
@@ -26,8 +27,20 @@ import {
   addDependencyCommand,
   hostHasDependency,
   getTemplateDependencies,
+  validateScaffoldOptions,
 } from "./InitService.js";
 import { defaultImageName } from "./sandboxes/docker.js";
+import { resolveCliStateDir, resolveInitStateDir } from "./StateDir.js";
+import {
+  discoverProjects,
+  findProjectByRepo,
+  inspectProjectState,
+  resolveProjectRepository,
+  touchProject,
+  type ProjectRecord,
+  registerProject,
+} from "./ProjectRegistry.js";
+import { spawnProjectRunner } from "./ProjectRunner.js";
 import type {
   AgentEntry,
   IssueTrackerEntry,
@@ -40,6 +53,13 @@ import { VERSION } from "./version.js";
 
 const imageNameOption = Options.text("image-name").pipe(
   Options.withDescription("Docker image name"),
+  Options.optional,
+);
+
+const stateDirOption = Options.text("state-dir").pipe(
+  Options.withDescription(
+    "Sandcastle state directory (defaults to the per-user project cache)",
+  ),
   Options.optional,
 );
 
@@ -62,23 +82,217 @@ const defaultUidBuildArgs = (): Record<string, string> => {
 
 // --- Config directory check ---
 
-const CONFIG_DIR = ".sandcastle";
-
 const requireConfigDir = (
   cwd: string,
-): Effect.Effect<void, ConfigDirError, FileSystem.FileSystem> =>
+  stateDir?: string,
+): Effect.Effect<string, ConfigDirError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
+    const configDir = resolveCliStateDir(cwd, stateDir);
     const exists = yield* fs
-      .exists(join(cwd, CONFIG_DIR))
+      .exists(configDir)
       .pipe(Effect.catchAll(() => Effect.succeed(false)));
     if (!exists) {
       yield* Effect.fail(
         new ConfigDirError({
-          message: "No .sandcastle/ found. Run `sandcastle init` first.",
+          message:
+            "No .sandcastle/ found in the external Sandcastle state directory. " +
+            `Run \`sandcastle init ${cwd}\` first.`,
         }),
       );
     }
+    return configDir;
+  });
+
+const optionalRepositoryPath = () =>
+  Args.path({ name: "path" }).pipe(Args.optional);
+
+const optionValue = (value: Option.Option<string>): string | undefined =>
+  value._tag === "Some" ? value.value : undefined;
+
+const projectOptionLabel = (project: ProjectRecord): string =>
+  `${project.name} — ${project.repoDir ?? "(unknown repository)"}`;
+
+const projectOptionHint = (project: ProjectRecord): string =>
+  project.available
+    ? "available"
+    : `unavailable: ${project.reason ?? "unknown reason"}`;
+
+const runRegisteredProject = (
+  project: ProjectRecord,
+): Effect.Effect<void, ConfigDirError> =>
+  Effect.gen(function* () {
+    if (
+      !project.available ||
+      project.manifest === undefined ||
+      project.entryFile === undefined ||
+      project.repoDir === undefined
+    ) {
+      yield* Effect.fail(
+        new ConfigDirError({
+          message:
+            `Project "${project.name}" is unavailable: ${project.reason ?? "invalid project manifest"}. ` +
+            "Run `sandcastle init <path>` to initialize it again.",
+        }),
+      );
+    }
+
+    yield* Effect.tryPromise({
+      try: () => touchProject(project),
+      catch: (error) =>
+        new ConfigDirError({
+          message: `Could not update the project manifest: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        }),
+    });
+
+    const exitCode = yield* Effect.tryPromise({
+      try: () => spawnProjectRunner(project.entryFile!, project.repoDir!),
+      catch: (error) =>
+        new ConfigDirError({
+          message: `Could not start Sandcastle project "${project.name}": ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        }),
+    });
+    yield* Effect.sync(() => {
+      process.exitCode = exitCode;
+    });
+  });
+
+const findProjectForPath = (
+  repoPath: string,
+  stateDir?: string,
+): Effect.Effect<ProjectRecord, ConfigDirError> =>
+  Effect.gen(function* () {
+    const repoDir = resolveProjectRepository(resolve(process.cwd(), repoPath));
+    if (stateDir !== undefined) {
+      const project = yield* Effect.tryPromise({
+        try: () => inspectProjectState(resolve(process.cwd(), stateDir)),
+        catch: (error) =>
+          new ConfigDirError({
+            message: `Could not inspect Sandcastle state: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          }),
+      });
+      if (project.repoDir !== undefined) {
+        if (findProjectByRepo([project], repoDir) === undefined) {
+          yield* Effect.fail(
+            new ConfigDirError({
+              message:
+                `The state directory is registered for "${project.repoDir}", not "${repoDir}". ` +
+                `Run \`sandcastle init ${repoDir}\` first.`,
+            }),
+          );
+        }
+      }
+      return project;
+    }
+
+    const projects = yield* Effect.tryPromise({
+      try: () => discoverProjects(),
+      catch: (error) =>
+        new ConfigDirError({
+          message: `Could not discover Sandcastle projects: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        }),
+    });
+    const project = findProjectByRepo(projects, repoDir);
+    if (project === undefined) {
+      yield* Effect.fail(
+        new ConfigDirError({
+          message:
+            `No initialized Sandcastle project found for "${repoDir}". ` +
+            `Run \`sandcastle init ${repoDir}\` first.`,
+        }),
+      );
+    }
+    return project!;
+  });
+
+const selectProject = (
+  cwd: string,
+  stateDir?: string,
+): Effect.Effect<ProjectRecord | undefined, ConfigDirError, Display> =>
+  Effect.gen(function* () {
+    if (stateDir !== undefined) {
+      const project = yield* findProjectForPath(cwd, stateDir);
+      return project;
+    }
+
+    const projects = yield* Effect.tryPromise({
+      try: () => discoverProjects(),
+      catch: (error) =>
+        new ConfigDirError({
+          message: `Could not discover Sandcastle projects: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        }),
+    });
+
+    if (projects.length === 0) {
+      const d = yield* Display;
+      yield* d.status(
+        "No Sandcastle projects are initialized. Run `sandcastle init [path]` first.",
+        "info",
+      );
+      return undefined;
+    }
+
+    const current = findProjectByRepo(projects, cwd);
+    if (current?.available) return current;
+
+    const available = projects.filter((project) => project.available);
+    if (available.length === 0) {
+      const d = yield* Display;
+      for (const project of projects) {
+        yield* d.text(
+          `${projectOptionLabel(project)} — ${projectOptionHint(project)}`,
+        );
+      }
+      yield* d.status(
+        "No available Sandcastle projects were found. Run `sandcastle init <path>` to initialize a project.",
+        "warn",
+      );
+      return undefined;
+    }
+
+    if (process.stdin.isTTY !== true) {
+      const d = yield* Display;
+      for (const project of projects) {
+        yield* d.text(
+          `${projectOptionLabel(project)} — ${projectOptionHint(project)}`,
+        );
+      }
+      yield* Effect.fail(
+        new ConfigDirError({
+          message:
+            "Multiple Sandcastle projects are available, but project selection requires a TTY. " +
+            "Run `sandcastle <path>` to choose one explicitly.",
+        }),
+      );
+    }
+
+    const selected = yield* Effect.promise(() =>
+      clack.select({
+        message: "Select a Sandcastle project:",
+        options: projects.map((project) => ({
+          value: project.stateDir,
+          label: projectOptionLabel(project),
+          hint: projectOptionHint(project),
+          disabled: !project.available,
+        })),
+      }),
+    );
+    if (clack.isCancel(selected)) {
+      yield* Effect.fail(
+        new ConfigDirError({ message: "Project selection cancelled." }),
+      );
+    }
+    return projects.find((project) => project.stateDir === selected);
   });
 
 // --- Init command ---
@@ -103,7 +317,9 @@ const initModelOption = Options.text("model").pipe(
 );
 
 const sandboxOption = Options.text("sandbox").pipe(
-  Options.withDescription("Sandbox provider to use (e.g. docker, podman)"),
+  Options.withDescription(
+    "Sandbox provider to use (docker, podman, or no-sandbox)",
+  ),
   Options.optional,
 );
 
@@ -129,7 +345,7 @@ const createLabelOption = Options.choice("create-label", [
 
 const buildImageOption = Options.choice("build-image", ["true", "false"]).pipe(
   Options.withDescription(
-    "Whether to build the sandbox image now (ignored when --issue-tracker custom is selected)",
+    "Whether to build the sandbox image now (ignored for custom issue trackers and no-sandbox)",
   ),
   Options.optional,
 );
@@ -156,6 +372,7 @@ const choiceToTriBool = (
 const initCommand = Command.make(
   "init",
   {
+    path: optionalRepositoryPath(),
     imageName: imageNameOption,
     template: templateOption,
     agent: agentOption,
@@ -165,8 +382,10 @@ const initCommand = Command.make(
     createLabel: createLabelOption,
     buildImage: buildImageOption,
     installTemplateDeps: installTemplateDepsOption,
+    stateDir: stateDirOption,
   },
   ({
+    path: repositoryPath,
     imageName: imageNameFlag,
     template,
     agent: agentFlag,
@@ -176,11 +395,32 @@ const initCommand = Command.make(
     createLabel: createLabelFlag,
     buildImage: buildImageFlag,
     installTemplateDeps: installTemplateDepsFlag,
+    stateDir: stateDirFlag,
   }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = process.cwd();
+      const cwd = resolveProjectRepository(
+        resolve(process.cwd(), optionValue(repositoryPath) ?? process.cwd()),
+      );
+      const repositoryIsDirectory = yield* Effect.sync(() => {
+        try {
+          return statSync(cwd).isDirectory();
+        } catch {
+          return false;
+        }
+      });
+      if (!repositoryIsDirectory) {
+        yield* Effect.fail(
+          new InitError({
+            message: `Repository path "${cwd}" does not exist or is not a directory.`,
+          }),
+        );
+      }
       const imageName = resolveImageName(imageNameFlag, cwd);
+      const stateDir = resolveInitStateDir(
+        cwd,
+        stateDirFlag._tag === "Some" ? stateDirFlag.value : undefined,
+      );
 
       // Early validation of CLI flags before interactive prompts
       const templates = listTemplates();
@@ -393,6 +633,39 @@ const initCommand = Command.make(
         selectedTemplate = selected as string;
       }
 
+      // Resolve useWorktree: interactive confirm > default true.
+      let selectedUseWorktree = true;
+      if (!isInteractive) {
+        // Default to true when no interactive prompt is available.
+        selectedUseWorktree = true;
+      } else {
+        const useWorktreeConfirmed = yield* Effect.promise(() =>
+          clack.confirm({
+            message:
+              "Use git worktrees? (No = write directly to your working tree / head mode)",
+            initialValue: true,
+          }),
+        );
+        if (clack.isCancel(useWorktreeConfirmed)) {
+          yield* Effect.fail(
+            new InitError({ message: "Worktree selection cancelled." }),
+          );
+        }
+        selectedUseWorktree = useWorktreeConfirmed === true;
+      }
+
+      const scaffoldValidation = validateScaffoldOptions({
+        agent: selectedAgent,
+        model: selectedModel,
+        templateName: selectedTemplate,
+        issueTracker: selectedIssueTracker,
+        sandboxProvider: selectedSandboxProvider,
+        useWorktree: selectedUseWorktree,
+      });
+      if (scaffoldValidation) {
+        yield* Effect.fail(new InitError({ message: scaffoldValidation }));
+      }
+
       // Offer to create the "Sandcastle" label on the repo (skip for non-GitHub issue trackers).
       // CLI flag > interactive confirm. The flag is only meaningful for the github-issues tracker.
       let shouldCreateLabel = false;
@@ -418,7 +691,7 @@ const initCommand = Command.make(
       }
 
       const scaffoldResult = yield* d.spinner(
-        "Scaffolding .sandcastle/ config directory...",
+        "Scaffolding Sandcastle state directory...",
         scaffold(cwd, {
           agent: selectedAgent,
           model: selectedModel,
@@ -426,6 +699,8 @@ const initCommand = Command.make(
           createLabel: shouldCreateLabel,
           issueTracker: selectedIssueTracker,
           sandboxProvider: selectedSandboxProvider,
+          useWorktree: selectedUseWorktree,
+          stateDir,
         }).pipe(
           Effect.mapError(
             (e) =>
@@ -435,6 +710,24 @@ const initCommand = Command.make(
           ),
         ),
       );
+      yield* Effect.tryPromise({
+        try: () =>
+          registerProject({
+            repoDir: cwd,
+            stateDir: scaffoldResult.stateDir,
+            entryFile: join(
+              scaffoldResult.stateDir,
+              scaffoldResult.mainFilename,
+            ),
+          }),
+        catch: (error) =>
+          new InitError({
+            message: `Could not register the Sandcastle project: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          }),
+      });
+      yield* d.text(`State directory: ${scaffoldResult.stateDir}`);
 
       // Detect the host package manager so the zod offer below and the next
       // steps below both use the right install command.
@@ -477,11 +770,20 @@ const initCommand = Command.make(
       // an intentionally unfinished Dockerfile (the install block is a TODO),
       // so there is nothing valid to build yet — skip the build prompt entirely
       // (and silently ignore --build-image) and let the next steps point the
-      // user at the setup doc.
+      // user at the setup doc. Host-only (no-sandbox) providers skip the build too.
       const providerLabel = selectedSandboxProvider.label;
+      const needsImageBuild =
+        selectedSandboxProvider.containerfileName !== null;
       if (selectedIssueTracker.name === "custom") {
         yield* d.status(
-          "Init complete! Your custom issue tracker isn't configured yet — see the steps below before building.",
+          needsImageBuild
+            ? "Init complete! Your custom issue tracker isn't configured yet — see the steps below before building."
+            : "Init complete! Your custom issue tracker isn't configured yet — see the steps below before running.",
+          "success",
+        );
+      } else if (!needsImageBuild) {
+        yield* d.status(
+          "Init complete! No container image needed — the agent runs on your host.",
           "success",
         );
       } else {
@@ -493,7 +795,7 @@ const initCommand = Command.make(
         });
 
         if (shouldBuild) {
-          const containerfileDir = join(cwd, CONFIG_DIR);
+          const containerfileDir = scaffoldResult.stateDir;
           if (selectedSandboxProvider.name === "podman") {
             yield* d.spinner(
               `Building ${providerLabel} image '${imageName}'...`,
@@ -526,6 +828,9 @@ const initCommand = Command.make(
         selectedIssueTracker,
         selectedAgent,
         packageManager,
+        selectedSandboxProvider,
+        selectedUseWorktree,
+        scaffoldResult.stateDir,
       );
       for (const [i, line] of nextSteps.entries()) {
         yield* d.text(i === 0 ? line : styleText("dim", line));
@@ -547,16 +852,20 @@ const buildImageCommand = Command.make(
   {
     imageName: imageNameOption,
     dockerfile: dockerfileOption,
+    stateDir: stateDirOption,
   },
-  ({ imageName: imageNameFlag, dockerfile }) =>
+  ({ imageName: imageNameFlag, dockerfile, stateDir: stateDirFlag }) =>
     Effect.gen(function* () {
       const d = yield* Display;
       const cwd = process.cwd();
-      yield* requireConfigDir(cwd);
+      const configDir = yield* requireConfigDir(
+        cwd,
+        stateDirFlag._tag === "Some" ? stateDirFlag.value : undefined,
+      );
 
       const imageName = resolveImageName(imageNameFlag, cwd);
 
-      const dockerfileDir = join(cwd, CONFIG_DIR);
+      const dockerfileDir = configDir;
       const dockerfilePath =
         dockerfile._tag === "Some" ? dockerfile.value : undefined;
 
@@ -620,16 +929,20 @@ const podmanBuildImageCommand = Command.make(
   {
     imageName: imageNameOption,
     containerfile: containerfileOption,
+    stateDir: stateDirOption,
   },
-  ({ imageName: imageNameFlag, containerfile }) =>
+  ({ imageName: imageNameFlag, containerfile, stateDir: stateDirFlag }) =>
     Effect.gen(function* () {
       const d = yield* Display;
       const cwd = process.cwd();
-      yield* requireConfigDir(cwd);
+      const configDir = yield* requireConfigDir(
+        cwd,
+        stateDirFlag._tag === "Some" ? stateDirFlag.value : undefined,
+      );
 
       const imageName = resolveImageName(imageNameFlag, cwd);
 
-      const containerfileDir = join(cwd, CONFIG_DIR);
+      const containerfileDir = configDir;
       const containerfilePath =
         containerfile._tag === "Some" ? containerfile.value : undefined;
       yield* d.spinner(
@@ -681,12 +994,27 @@ const podmanCommand = Command.make("podman", {}, () =>
 
 // --- Root command ---
 
-const rootCommand = Command.make("sandcastle", {}, () =>
-  Effect.gen(function* () {
-    const d = yield* Display;
-    yield* d.status(`Sandcastle v${VERSION}`, "info");
-    yield* d.status("Use --help to see available commands.", "info");
-  }),
+const rootCommand = Command.make(
+  "sandcastle",
+  {
+    path: optionalRepositoryPath(),
+    stateDir: stateDirOption,
+  },
+  ({ path: repositoryPath, stateDir: stateDirFlag }) =>
+    Effect.gen(function* () {
+      const stateDir = optionValue(stateDirFlag);
+      const repository = optionValue(repositoryPath);
+      if (repository !== undefined) {
+        const project = yield* findProjectForPath(repository, stateDir);
+        yield* runRegisteredProject(project);
+        return;
+      }
+
+      const project = yield* selectProject(process.cwd(), stateDir);
+      if (project !== undefined) {
+        yield* runRegisteredProject(project);
+      }
+    }),
 );
 
 export const sandcastle = rootCommand.pipe(

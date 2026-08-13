@@ -2,6 +2,7 @@ import {
   readFileSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -371,6 +372,18 @@ describe("signal (AbortSignal)", () => {
       signal: ac.signal,
     };
     expect(opts.signal).toBe(ac.signal);
+  });
+
+  it("allows an external state directory on RunOptions", () => {
+    const opts: RunOptions = {
+      agent: undefined as never,
+      sandbox: undefined as never,
+      cwd: "C:/projects/unity-game",
+      stateDir: "C:/tools/unity-agent/project-state",
+      prompt: "work on the task",
+    };
+
+    expect(opts.stateDir).toBe("C:/tools/unity-agent/project-state");
   });
 
   it("allows signal to be omitted", () => {
@@ -790,6 +803,23 @@ describe("run() error logging to file", () => {
         logging: { type: "file", path: logPath },
       }),
     ).rejects.toThrow("SOURCE_BRANCH");
+  });
+
+  it("writes default logs under an external state directory", async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "sandcastle-state-"));
+    const promptFile = join(stateDir, "prompt.md");
+    writeFileSync(promptFile, "test prompt");
+
+    await run({
+      agent: claudeCode("claude-opus-4-8"),
+      sandbox: testSandbox,
+      promptFile,
+      branchStrategy: { type: "head" },
+      stateDir,
+    });
+
+    const logs = readdirSync(join(stateDir, "logs"));
+    expect(logs.some((file) => file.endsWith(".log"))).toBe(true);
   });
 });
 

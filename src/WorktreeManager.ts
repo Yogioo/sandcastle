@@ -275,7 +275,8 @@ const fastForwardFromOrigin = (
   });
 
 /**
- * Creates a git worktree at `.sandcastle/worktrees/<name>/`.
+ * Creates a git worktree at the configured worktrees directory. The default is
+ * `.sandcastle/worktrees/<name>`.
  *
  * - If `branch` is specified, checks out that branch.
  * - If not, creates a temporary `sandcastle/<timestamp>` branch.
@@ -294,6 +295,8 @@ export const create = (
     branch?: string;
     baseBranch?: string;
     name?: string;
+    /** Directory where Sandcastle-managed worktrees are created. */
+    worktreesDir?: string;
   },
 ): Effect.Effect<
   WorktreeInfo,
@@ -302,7 +305,8 @@ export const create = (
 > =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const worktreesDir = join(repoDir, ".sandcastle", "worktrees");
+    const worktreesDir =
+      opts?.worktreesDir ?? join(repoDir, ".sandcastle", "worktrees");
     yield* fs
       .makeDirectory(worktreesDir, { recursive: true })
       .pipe(Effect.mapError((e) => new WorktreeError({ message: e.message })));
@@ -335,7 +339,7 @@ export const create = (
       const existing = yield* listWorktrees(repoDir);
       const collision = findCollidingWorktree(existing, branch, worktreePath);
       if (collision) {
-        // Only reuse worktrees managed by sandcastle (under .sandcastle/worktrees/)
+        // Only reuse worktrees managed by Sandcastle under the configured root.
         if (isManagedWorktreePath(collision.path, worktreesDir)) {
           const dirty = yield* hasUncommittedChanges(collision.path);
           if (dirty) {
@@ -354,7 +358,7 @@ export const create = (
           new WorktreeError({
             message:
               `Branch '${branch}' is already checked out in worktree at '${collision.path}'. ` +
-              `Sandcastle's branch and merge-to-head strategies run the agent in a git worktree under .sandcastle/worktrees/, ` +
+              `Sandcastle's branch and merge-to-head strategies run the agent in a managed git worktree under '${worktreesDir}', ` +
               `and git refuses to check out the same branch in two worktrees at once (HEAD would become ambiguous). ` +
               `Pick a different branch, or switch the main working tree to a different branch before re-running.`,
           }),
@@ -441,25 +445,33 @@ export const hasUncommittedChanges = (
 /**
  * Removes a worktree and its git metadata.
  *
- * The `worktreePath` must be a path inside `.sandcastle/worktrees/` so that
- * the main repository directory can be derived from it.
+ * `repoDir` is explicit when the worktree lives outside the repository, as it
+ * does for the external state directory. The optional argument preserves the
+ * historical path-derived behavior for legacy callers.
  */
 export const remove = (
   worktreePath: string,
+  repoDir?: string,
 ): Effect.Effect<void, WorktreeError> => {
-  // Derive the main repo dir: worktreePath = <repoDir>/.sandcastle/worktrees/<name>
-  const repoDir = join(worktreePath, "..", "..", "..");
-  return execGit(["worktree", "remove", "--force", worktreePath], repoDir).pipe(
+  // The explicit repoDir is required for external state directories. Keep the
+  // legacy path derivation for callers using the historical layout.
+  const resolvedRepoDir =
+    repoDir ?? join(worktreePath, "..", "..", "..");
+  return execGit(
+    ["worktree", "remove", "--force", worktreePath],
+    resolvedRepoDir,
+  ).pipe(
     Effect.asVoid,
   );
 };
 
 /**
  * Prunes stale git worktree metadata and removes orphaned directories under
- * `.sandcastle/worktrees/`.
+ * the configured worktrees directory.
  */
 export const pruneStale = (
   repoDir: string,
+  worktreesDir = join(repoDir, ".sandcastle", "worktrees"),
 ): Effect.Effect<
   void,
   WorktreeError | WorktreeTimeoutError,
@@ -470,8 +482,6 @@ export const pruneStale = (
 
     // Let git clean up metadata for worktrees whose directories are gone
     yield* execGit(["worktree", "prune"], repoDir);
-
-    const worktreesDir = join(repoDir, ".sandcastle", "worktrees");
 
     // Read directory entries — return null if directory doesn't exist
     const entries: string[] | null = yield* fs.readDirectory(worktreesDir).pipe(

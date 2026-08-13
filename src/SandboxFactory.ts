@@ -28,6 +28,7 @@ import { runHostHooks, type SandboxHooks } from "./SandboxLifecycle.js";
 import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
 import { patchGitMountsForWindows } from "./mountUtils.js";
+import { resolveRuntimeStateDir } from "./StateDir.js";
 
 export interface ExecResult {
   readonly stdout: string;
@@ -167,6 +168,8 @@ export class SandboxConfig extends Context.Tag("SandboxConfig")<
   {
     readonly env: Record<string, string>;
     readonly hostRepoDir: string;
+    /** Root for Sandcastle-owned env, logs, worktrees, and patches. */
+    readonly stateDir?: string;
     /** Paths relative to the host repo root to copy into the worktree before sandbox start. */
     readonly copyToWorktree?: string[];
     /** When specified, the run name is included in the auto-generated branch and worktree names. */
@@ -202,6 +205,7 @@ const printWorktreePreservedMessage = (
  */
 const cleanupWorktree = (
   worktreePath: string,
+  repoDir: string,
   exit: Exit.Exit<unknown, unknown>,
 ): Effect.Effect<string | undefined, WorktreeError> =>
   WorktreeManager.hasUncommittedChanges(worktreePath).pipe(
@@ -219,7 +223,7 @@ const cleanupWorktree = (
       if (!Exit.isSuccess(exit)) {
         console.error(`\nWorktree removed (no uncommitted changes)`);
       }
-      return WorktreeManager.remove(worktreePath).pipe(
+      return WorktreeManager.remove(worktreePath, repoDir).pipe(
         Effect.map(() => undefined as string | undefined),
       );
     }),
@@ -294,6 +298,7 @@ export const WorktreeDockerSandboxFactory = {
       const {
         env,
         hostRepoDir,
+        stateDir: configuredStateDir,
         copyToWorktree: copyPaths,
         name,
         sandboxProvider,
@@ -302,6 +307,10 @@ export const WorktreeDockerSandboxFactory = {
         signal,
         timeouts,
       } = yield* SandboxConfig;
+      const stateDir = resolveRuntimeStateDir(
+        hostRepoDir,
+        configuredStateDir,
+      );
 
       const isHeadMode = branchStrategy.type === "head";
       const branch =
@@ -315,7 +324,10 @@ export const WorktreeDockerSandboxFactory = {
 
       /** Prune stale worktrees (best-effort), then create a fresh one. */
       const pruneAndCreate = () =>
-        WorktreeManager.pruneStale(hostRepoDir).pipe(
+        WorktreeManager.pruneStale(
+          hostRepoDir,
+          join(stateDir, "worktrees"),
+        ).pipe(
           Effect.catchAll((e) =>
             Effect.sync(() => {
               console.error(
@@ -326,8 +338,15 @@ export const WorktreeDockerSandboxFactory = {
           ),
           Effect.andThen(
             branch
-              ? WorktreeManager.create(hostRepoDir, { branch, baseBranch })
-              : WorktreeManager.create(hostRepoDir, { name }),
+              ? WorktreeManager.create(hostRepoDir, {
+                  branch,
+                  baseBranch,
+                  worktreesDir: join(stateDir, "worktrees"),
+                })
+              : WorktreeManager.create(hostRepoDir, {
+                  name,
+                  worktreesDir: join(stateDir, "worktrees"),
+                }),
           ),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
         );
@@ -438,7 +457,7 @@ export const WorktreeDockerSandboxFactory = {
                   ),
                 ) as Effect.Effect<A, E | SandboxError, R>,
               (worktreeInfo, exit) =>
-                cleanupWorktree(worktreeInfo.path, exit).pipe(
+                cleanupWorktree(worktreeInfo.path, hostRepoDir, exit).pipe(
                   Effect.tap((p) => {
                     preservedPath = p;
                   }),
@@ -491,6 +510,7 @@ export const WorktreeDockerSandboxFactory = {
                               syncOut(
                                 worktreeInfo.path,
                                 handle as IsolatedSandboxHandle,
+                                stateDir,
                               ),
                           },
                           sandbox,
@@ -504,7 +524,7 @@ export const WorktreeDockerSandboxFactory = {
                   ),
                 ) as Effect.Effect<A, E | SandboxError, R>,
               (worktreeInfo, exit) =>
-                cleanupWorktree(worktreeInfo.path, exit).pipe(
+                cleanupWorktree(worktreeInfo.path, hostRepoDir, exit).pipe(
                   Effect.tap((p) => {
                     preservedPath = p;
                   }),
@@ -668,7 +688,7 @@ export const WorktreeDockerSandboxFactory = {
               ) as Effect.Effect<A, E | SandboxError, R>,
             // Release: remove or preserve the worktree based on dirty state.
             (worktreeInfo, exit) =>
-              cleanupWorktree(worktreeInfo.path, exit).pipe(
+              cleanupWorktree(worktreeInfo.path, hostRepoDir, exit).pipe(
                 Effect.tap((p) => {
                   preservedWorktreePath = p;
                 }),

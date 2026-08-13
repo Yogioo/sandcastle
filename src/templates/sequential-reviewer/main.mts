@@ -17,12 +17,15 @@
 // execution with a planning phase).
 //
 // Usage:
-//   npx tsx .sandcastle/main.mts
-// Or add to package.json:
-//   "scripts": { "sandcastle": "npx tsx .sandcastle/main.mts" }
+//   Run the generated file at the path printed by `sandcastle init`.
 
-import * as sandcastle from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import * as sandcastle from "@yogioo/sandcastle";
+import { docker } from "@yogioo/sandcastle/sandboxes/docker";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const repoDir = process.cwd();
+const workflowDir = fileURLToPath(new URL(".", import.meta.url));
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -57,6 +60,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // This gives both agents a real, named branch that persists across phases.
   const sandbox = await sandcastle.createSandbox({
     branch,
+    cwd: repoDir,
+    stateDir: workflowDir,
     sandbox: docker(),
     hooks,
     copyToWorktree,
@@ -80,7 +85,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       name: "implementer",
       maxIterations: 1,
       agent: sandcastle.claudeCode("claude-sonnet-4-6"),
-      promptFile: "./.sandcastle/implement-prompt.md",
+      promptFile: join(workflowDir, "implement-prompt.md"),
     });
 
     if (!implement.commits.length) {
@@ -104,7 +109,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       name: "reviewer",
       maxIterations: 1,
       agent: sandcastle.claudeCode("claude-sonnet-4-6"),
-      promptFile: "./.sandcastle/review-prompt.md",
+      promptFile: join(workflowDir, "review-prompt.md"),
       promptArgs: {
         BRANCH: branch,
       },
