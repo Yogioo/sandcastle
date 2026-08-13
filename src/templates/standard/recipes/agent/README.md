@@ -12,20 +12,20 @@ Init writes these from the chosen agent. To switch after init, edit the same set
 
 | File                                                                                              | What changes                                                                                                                                                    |
 | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Root `main.ts` / `main.mts`                                                                       | The agent factory import from `@yogioo/sandcastle` and every `agent:` factory call (implement and review). `factory()` ↔ `factory("model-id")` for the model. |
+| Root `main.ts` / `main.mts`                                                                       | The agent factory import from `@yogioo/sandcastle` and every `agent:` factory call (implement and review). `factory()` ↔ `factory("model-id")` for the model.   |
 | Container file (`Dockerfile` / `Containerfile`, or none for no-sandbox)                           | The CLI install block for the agent.                                                                                                                            |
 | `.env`                                                                                            | The agent's env keys (uncomment and fill).                                                                                                                      |
 
 ## Built-in agents (init registry)
 
-| Agent               | Factory      | Container CLI install                                                    | `.env` keys                                            |
-| ------------------- | ------------ | ------------------------------------------------------------------------ | ------------------------------------------------------ |
-| Claude Code         | `claudeCode` | `curl -fsSL https://claude.ai/install.sh \| bash`, then `ENV PATH="/home/agent/.local/bin:$PATH"` | `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` |
-| Pi                  | `pi`         | `npm install -g @mariozechner/pi-coding-agent`                            | `ANTHROPIC_API_KEY`                                    |
-| Codex               | `codex`      | `npm install -g @openai/codex`                                            | `OPENAI_KEY`                                           |
-| Cursor              | `cursor`     | `curl https://cursor.com/install -fsS \| bash`, then `ENV PATH="/home/agent/.local/bin:$PATH"`   | `CURSOR_API_KEY`                                       |
-| OpenCode            | `opencode`   | `npm install -g opencode-ai@latest`                                       | `OPENCODE_API_KEY`                                     |
-| GitHub Copilot CLI  | `copilot`    | `npm install -g @github/copilot`                                          | `COPILOT_GITHUB_TOKEN` (or `GH_TOKEN` / `GITHUB_TOKEN`) |
+| Agent               | Factory      | Container CLI install                                                                             | `.env` keys                                             |
+| ------------------- | ------------ | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Claude Code         | `claudeCode` | `curl -fsSL https://claude.ai/install.sh \| bash`, then `ENV PATH="/home/agent/.local/bin:$PATH"` | `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`        |
+| Pi                  | `pi`         | `npm install -g @mariozechner/pi-coding-agent`                                                    | `ANTHROPIC_API_KEY`                                     |
+| Codex               | `codex`      | `npm install -g @openai/codex`                                                                    | `OPENAI_KEY`                                            |
+| Cursor              | `cursor`     | `curl https://cursor.com/install -fsS \| bash`, then `ENV PATH="/home/agent/.local/bin:$PATH"`    | `CURSOR_API_KEY`                                        |
+| OpenCode            | `opencode`   | `npm install -g opencode-ai@latest`                                                               | `OPENCODE_API_KEY`                                      |
+| GitHub Copilot CLI  | `copilot`    | `npm install -g @github/copilot`                                                                  | `COPILOT_GITHUB_TOKEN` (or `GH_TOKEN` / `GITHUB_TOKEN`) |
 
 ## Steps
 

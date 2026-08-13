@@ -465,7 +465,6 @@ describe("InitService scaffold", () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "standard" });
 
-      const { access } = await import("node:fs/promises");
       await expect(
         access(join(dir, ".sandcastle", "recipes", "worktree", "README.md")),
       ).resolves.toBeUndefined();
@@ -481,7 +480,6 @@ describe("InitService scaffold", () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "standard" });
 
-      const { access } = await import("node:fs/promises");
       await expect(
         access(join(dir, ".sandcastle", "recipes", "agent", "README.md")),
       ).resolves.toBeUndefined();
@@ -557,7 +555,7 @@ describe("InitService scaffold", () => {
       expect(agentsMd).toContain("`recipes/sandbox-provider/`");
       // The factory guard maps each init choice to its recipe.
       expect(agentsMd).toContain("`recipes/agent/` (agent or model)");
-      expect(agentsMd).toContain("recipes/issue-tracker/");
+      expect(agentsMd).toContain("`recipes/issue-tracker/`, or `recipes/sandbox-provider/`");
       // The model is covered by the agent recipe, not a recipe of its own.
       expect(agentsMd).not.toContain("recipes/model/");
     });
