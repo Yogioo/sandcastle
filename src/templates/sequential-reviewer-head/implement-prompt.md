@@ -37,17 +37,31 @@ Pick the highest-priority open issue that is not blocked by another open issue.
    - List key decisions made
    - List files changed
    - Note any blockers for the next iteration
-6. **Close** — close the issue with `{{CLOSE_TASK_COMMAND}}` explaining what was done.
+6. **Close** — if you implemented the issue (`done`) or it needs no code change (`no_change`), close it with `{{CLOSE_TASK_COMMAND}}` explaining what was done. Do not close it when you are blocked.
 
 ## Rules
 
 - Work on **one issue per iteration**. Do not attempt multiple issues in a single iteration.
-- Do not close an issue until you have committed the fix and verified tests pass.
 - Do not leave commented-out code or TODO comments in committed code.
 - If you are blocked (missing context, failing tests you cannot fix, external dependency), leave a comment on the issue and move on — do not close it.
 
-# Done
+# OUTCOME
 
-When all actionable issues are complete (or you are blocked on all remaining ones), or the open-issues block at the top of this prompt is empty, output the completion signal:
+After this pass, emit exactly one JSON object inside `<outcome>` tags so the orchestrator can decide whether to review, continue, or stop:
+
+<outcome>
+{"status": "done", "taskId": "42"}
+</outcome>
+
+`status` must be one of:
+
+- `done` — you implemented the chosen issue and committed. Close it after the commit.
+- `no_change` — the chosen issue needs no code change (already done, duplicate, or not a code task). Close it with an explanation. Do not invent a commit.
+- `blocked` — you cannot complete the chosen issue. Leave a comment and do not close it.
+- `empty` — the open-issues list is empty, or nothing in it is pickable. Do not invent work.
+
+`taskId` is the issue id you worked on. Omit it when `status` is `empty`.
+
+Then output the completion signal:
 
 <promise>COMPLETE</promise>

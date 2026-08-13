@@ -33,9 +33,10 @@ export interface TemplateMetadata {
   description: string;
   /**
    * Host-side npm packages the template's `main` file imports directly (e.g.
-   * the planner templates import `zod` for their `<plan>` output schema). Init
-   * offers to install these with the detected package manager so that
-   * `npx tsx .sandcastle/main.ts` doesn't crash with ERR_MODULE_NOT_FOUND.
+   * planner and sequential-reviewer templates import `zod` for structured
+   * output schemas). Init offers to install these with the detected package
+   * manager so that `npx tsx .sandcastle/main.ts` doesn't crash with
+   * ERR_MODULE_NOT_FOUND.
    */
   dependencies?: readonly string[];
 }
@@ -58,11 +59,13 @@ const TEMPLATES: TemplateMetadata[] = [
     name: "sequential-reviewer",
     description:
       "Implements issues one by one, with a code review step after each",
+    dependencies: ["zod"],
   },
   {
     name: "sequential-reviewer-head",
     description:
       "Head-mode implement→review loop (commit-range review, no worktree)",
+    dependencies: ["zod"],
   },
   {
     name: "parallel-planner",
@@ -755,7 +758,8 @@ export function getNextStepsLines(
     return formatStateLines(lines);
   } else {
     const hasReviewer = template.includes("review");
-    const usesPlanSchema = getTemplateDependencies(template).includes("zod");
+    const usesSchemaValidator =
+      getTemplateDependencies(template).includes("zod");
     let step = 1;
     const lines: string[] = [
       "Next steps:",
@@ -784,9 +788,9 @@ export function getNextStepsLines(
         `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup (missing paths are skipped). Add a \`sandbox.onSandboxReady\` install command if your project needs a package-manager install after the sandbox starts`,
       );
     }
-    if (usesPlanSchema) {
+    if (usesSchemaValidator) {
       lines.push(
-        `${step++}. Install a schema validator for the planner's \`<plan>\` output — the template uses Zod (\`${addDependencyCommand(packageManager, "zod")}\`), but Valibot, ArkType, or any Standard Schema library works (https://standardschema.dev)`,
+        `${step++}. Install a schema validator for structured agent output — the template uses Zod (\`${addDependencyCommand(packageManager, "zod")}\`), but Valibot, ArkType, or any Standard Schema library works (https://standardschema.dev)`,
       );
     }
     lines.push(

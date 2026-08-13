@@ -108,6 +108,10 @@ describe("getTemplateDependencies", () => {
     expect(getTemplateDependencies("parallel-planner-with-review")).toContain(
       "zod",
     );
+    expect(getTemplateDependencies("sequential-reviewer")).toContain("zod");
+    expect(getTemplateDependencies("sequential-reviewer-head")).toContain(
+      "zod",
+    );
   });
 
   it("reports no dependencies for templates that don't need a schema validator", () => {

@@ -15,6 +15,7 @@ import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import { claudeCode, codex, pi } from "./AgentProvider.js";
 import { createSandbox, type CreateSandboxOptions } from "./createSandbox.js";
+import { Output, StructuredOutputError } from "./Output.js";
 import type { SandboxService } from "./SandboxFactory.js";
 import {
   createBindMountSandboxProvider,
@@ -295,6 +296,163 @@ describe("createSandbox", () => {
       expect(result.iterations.length).toBe(1);
       expect(typeof result.stdout).toBe("string");
       expect(Array.isArray(result.commits)).toBe(true);
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sandbox.run() extracts structured output", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const sandbox = await createSandbox({
+      branch: "test-output-branch",
+      sandbox: testSandbox,
+      cwd: hostDir,
+      _test: {
+        buildSandbox: (sandboxDir) =>
+          makeMockAgentLayer(
+            sandboxDir,
+            async () => '<result>{"answer":42}</result>',
+          ),
+      },
+    });
+
+    try {
+      const result = await sandbox.run({
+        agent: testProvider,
+        prompt: "emit your answer inside <result> tags",
+        maxIterations: 1,
+        output: Output.object({
+          tag: "result",
+          schema: {
+            "~standard": {
+              version: 1 as const,
+              vendor: "test",
+              validate: (value: unknown) => ({ value }),
+            },
+          },
+        }),
+      });
+
+      expect(result.output).toEqual({ answer: 42 });
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sandbox.run() throws when output is set with maxIterations !== 1", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const sandbox = await createSandbox({
+      branch: "test-output-iters",
+      sandbox: testSandbox,
+      cwd: hostDir,
+      _test: {
+        buildSandbox: (sandboxDir) =>
+          makeMockAgentLayer(sandboxDir, async () => "agent output"),
+      },
+    });
+
+    try {
+      await expect(
+        sandbox.run({
+          agent: testProvider,
+          prompt: "emit <result>...</result>",
+          maxIterations: 2,
+          output: Output.object({
+            tag: "result",
+            schema: {
+              "~standard": {
+                version: 1 as const,
+                vendor: "test",
+                validate: (value: unknown) => ({ value }),
+              },
+            },
+          }),
+        }),
+      ).rejects.toThrow("output requires maxIterations to be 1");
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sandbox.run() throws when output tag is not in the prompt", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const sandbox = await createSandbox({
+      branch: "test-output-tag",
+      sandbox: testSandbox,
+      cwd: hostDir,
+      _test: {
+        buildSandbox: (sandboxDir) =>
+          makeMockAgentLayer(sandboxDir, async () => "agent output"),
+      },
+    });
+
+    try {
+      await expect(
+        sandbox.run({
+          agent: testProvider,
+          prompt: "do some work",
+          output: Output.object({
+            tag: "result",
+            schema: {
+              "~standard": {
+                version: 1 as const,
+                vendor: "test",
+                validate: (value: unknown) => ({ value }),
+              },
+            },
+          }),
+        }),
+      ).rejects.toThrow("output tag <result> not found in the resolved prompt");
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sandbox.run() throws StructuredOutputError when the tag is missing from stdout", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const sandbox = await createSandbox({
+      branch: "test-output-missing",
+      sandbox: testSandbox,
+      cwd: hostDir,
+      _test: {
+        buildSandbox: (sandboxDir) =>
+          makeMockAgentLayer(sandboxDir, async () => "no tag here"),
+      },
+    });
+
+    try {
+      await expect(
+        sandbox.run({
+          agent: testProvider,
+          prompt: "emit your answer inside <result> tags",
+          output: Output.object({
+            tag: "result",
+            schema: {
+              "~standard": {
+                version: 1 as const,
+                vendor: "test",
+                validate: (value: unknown) => ({ value }),
+              },
+            },
+          }),
+        }),
+      ).rejects.toBeInstanceOf(StructuredOutputError);
     } finally {
       await sandbox.close();
       await rm(hostDir, { recursive: true, force: true });

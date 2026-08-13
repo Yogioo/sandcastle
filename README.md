@@ -867,7 +867,7 @@ try {
 
 选择 beads 时，init 会校验宿主机 `bd` CLI 是否在 PATH 上（没有则报错），并在仓库尚未初始化 beads 数据库时询问是否运行 `bd init`。选否会取消 init。非交互模式用 `--init-beads true|false`。
 
-init 从 `packageManager` 字段或锁文件检测宿主机包管理器（npm、pnpm、yarn、bun），默认 npm。模板 `main` 若导入宿主机依赖——规划模板为 `<plan>` 输出 schema 导入 [Zod](https://zod.dev)——会在 `package.json` 中尚未存在时提示用该包管理器安装，避免首次运行缓存目录中的 `main.ts` 出现 `ERR_MODULE_NOT_FOUND`。
+init 从 `packageManager` 字段或锁文件检测宿主机包管理器（npm、pnpm、yarn、bun），默认 npm。模板 `main` 若导入宿主机依赖——规划模板的 `<plan>` 与 sequential-reviewer 模板的 `<outcome>` 输出 schema 导入 [Zod](https://zod.dev)——会在 `package.json` 中尚未存在时提示用该包管理器安装，避免首次运行缓存目录中的 `main.ts` 出现 `ERR_MODULE_NOT_FOUND`。
 
 init 的主要选项会在交互界面中选择；同时保留已有的 `--flag` 以支持 CI 和脚本。Git 模式不再作为独立交互选项——通过模板选择（`*-head` vs 默认）。stdin 非 TTY 且缺少必填 flag 时，init 快速失败并给出明确错误，而非卡在提示上。
 

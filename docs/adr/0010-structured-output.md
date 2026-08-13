@@ -11,7 +11,7 @@ Structured output is a separate domain concept from the **completion signal**. T
 - **Throw on failure.** Missing tag, invalid JSON, or schema validation failure throws a `StructuredOutputError` carrying `tag`, `rawMatched`, `cause`, `commits`, `branch`, `preservedWorktreePath?`, and the failed iteration's `sessionId?`/`sessionFilePath?` (see "Recovery surface" below). No auto-cleanup of worktree or branch — the caller decides recovery.
 - **Last match wins** when the tag occurs multiple times in stdout. Self-correction by the agent is the realistic case, and end-first scanning matches how `Orchestrator.ts` already locates the completion signal.
 - **Fence-aware extraction.** The contents of the tag are stripped of leading/trailing whitespace and unwrapped from an optional ` ```json ... ``` ` (or bare ` ``` ... ``` `) fence before `JSON.parse`. No other tolerance — invalid JSON throws.
-- **`run()` only.** Not available on `interactive()` or `wt.interactive()`; type-level exclusion, no runtime guard needed.
+- **`run()` and `sandbox.run()`.** Not available on `interactive()` or `wt.interactive()`; type-level exclusion, no runtime guard needed. `sandbox.run()` accepts the same `output` option so shared-sandbox templates (e.g. sequential-reviewer) can extract typed payloads without leaving the long-lived sandbox.
 
 ## Considered Options
 
@@ -27,7 +27,7 @@ Structured output is a separate domain concept from the **completion signal**. T
 
 - `Output` is exported from the package root with `Output.object({ tag, schema })` as the v1 entry. Future siblings (`Output.string`, `Output.array`) share the same XML-tag plumbing.
 - `RunResult` gains a typed `output: T` field _only_ when the overloaded form is used; the non-output form is unchanged.
-- Two new entry-time validations on `run()`: (1) `output` set with `maxIterations !== 1` throws; (2) `output` set with the tag absent from the resolved prompt throws.
+- Two new entry-time validations on `run()` and `sandbox.run()`: (1) `output` set with `maxIterations !== 1` throws; (2) `output` set with the tag absent from the resolved prompt throws.
 - `StructuredOutputError` is a new public error type; callers can `instanceof`-narrow to recover.
 - The completion signal mechanism in `Orchestrator.ts` is unchanged. Structured-output extraction is a separate pass over the same stdout.
 

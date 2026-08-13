@@ -88,7 +88,7 @@ describe("InitService scaffold", () => {
     expect(main).toContain(
       'import { noSandbox } from "@yogioo/sandcastle/sandboxes/no-sandbox"',
     );
-    expect(main).not.toContain("import.meta.resolve");
+    expect(main).toContain('import.meta.resolve("zod"');
     expect(main).not.toContain('from "@yogioo/sandcastle/sandboxes/docker"');
   });
 
@@ -562,7 +562,7 @@ describe("InitService scaffold", () => {
       expect(mainTs).not.toContain("merge-to-head");
     });
 
-    it("main.mts only reviews when implementer produces commits", async () => {
+    it("main.mts only reviews when implementer reports done with commits", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
@@ -570,7 +570,8 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain("implement.commits.length");
+      expect(mainTs).toContain('status === "done"');
+      expect(mainTs).toContain("commits.length > 0");
     });
 
     it("implement-prompt.md contains issue selection and closure, not prompt argument placeholders", async () => {
@@ -678,7 +679,7 @@ describe("InitService scaffold", () => {
       expect(implementerSection).not.toContain("maxIterations: 100");
     });
 
-    it("main.mts stops the loop when the implementer produces no commits", async () => {
+    it("main.mts stops the loop when the implementer reports empty with no commits", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
@@ -686,10 +687,59 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      const noCommitIndex = mainTs.indexOf("!implement.commits.length");
-      const section = mainTs.slice(noCommitIndex, noCommitIndex + 400);
+      const emptyIndex = mainTs.indexOf(
+        'status === "empty" && commits.length === 0',
+      );
+      expect(emptyIndex).toBeGreaterThan(-1);
+      const section = mainTs.slice(emptyIndex, emptyIndex + 400);
       expect(section).toContain("break");
-      expect(section).not.toContain("continue");
+      expect(mainTs).not.toContain("!implement.commits.length");
+    });
+
+    it("main.mts resumes once on StructuredOutputError then falls back to git", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "sequential-reviewer" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("StructuredOutputError");
+      expect(mainTs).toContain("resumeSession: error.sessionId");
+      expect(mainTs).toContain("MAX_OUTCOME_FAILURES");
+      expect(mainTs).toContain("fallbackOutcome");
+    });
+
+    it("main.mts extracts a structured <outcome> from the implementer", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "sequential-reviewer" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("Output.object");
+      expect(mainTs).toContain('tag: "outcome"');
+      expect(mainTs).toContain('from "zod"');
+      expect(mainTs).toContain('"done"');
+      expect(mainTs).toContain('"no_change"');
+      expect(mainTs).toContain('"blocked"');
+      expect(mainTs).toContain('"empty"');
+    });
+
+    it("implement-prompt.md instructs the agent to emit <outcome> statuses", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "sequential-reviewer" });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "implement-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("<outcome>");
+      expect(prompt).toContain('"status": "done"');
+      expect(prompt).toContain("`no_change`");
+      expect(prompt).toContain("`blocked`");
+      expect(prompt).toContain("`empty`");
     });
   });
 
@@ -745,7 +795,50 @@ describe("InitService scaffold", () => {
       );
       expect(mainTs).toContain("git rev-parse HEAD");
       expect(mainTs).toContain("BASE_SHA: baseSha");
-      expect(mainTs).toContain("implement.commits.length");
+      expect(mainTs).toContain("commits.length");
+    });
+
+    it("main.mts stops the loop when the implementer reports empty with no commits", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "sequential-reviewer-head" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain('status === "empty" && commits.length === 0');
+      expect(mainTs).toContain("break");
+      expect(mainTs).not.toContain("!implement.commits.length");
+      expect(mainTs).toContain("Output.object");
+      expect(mainTs).toContain('tag: "outcome"');
+      expect(mainTs).toContain('from "zod"');
+    });
+
+    it("main.mts resumes once on StructuredOutputError then falls back to git", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "sequential-reviewer-head" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("StructuredOutputError");
+      expect(mainTs).toContain("resumeSession: error.sessionId");
+      expect(mainTs).toContain("MAX_OUTCOME_FAILURES");
+      expect(mainTs).toContain("fallbackOutcome");
+    });
+
+    it("implement-prompt.md instructs the agent to emit <outcome> statuses", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "sequential-reviewer-head" });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "implement-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("<outcome>");
+      expect(prompt).toContain("`no_change`");
+      expect(prompt).toContain("`empty`");
     });
 
     it("review-prompt.md reviews BASE_SHA..HEAD commit range, not worktree branches", async () => {
@@ -969,6 +1062,15 @@ describe("InitService scaffold", () => {
       const lines = next("parallel-planner-with-review", "main.mts");
       const joined = lines.join("\n");
       expect(joined).toContain("npm install zod");
+    });
+
+    it("sequential-reviewer templates include the schema validator step", () => {
+      expect(next("sequential-reviewer", "main.mts").join("\n")).toContain(
+        "npm install zod",
+      );
+      expect(next("sequential-reviewer-head", "main.mts").join("\n")).toContain(
+        "npm install zod",
+      );
     });
 
     it("planner zod step uses the detected package manager's add command", () => {
@@ -1216,6 +1318,7 @@ describe("InitService scaffold", () => {
     const cases: Array<{ template: string; file: string }> = [
       { template: "simple-loop", file: "prompt.md" },
       { template: "sequential-reviewer", file: "implement-prompt.md" },
+      { template: "sequential-reviewer-head", file: "implement-prompt.md" },
       { template: "parallel-planner", file: "merge-prompt.md" },
       { template: "parallel-planner-with-review", file: "merge-prompt.md" },
     ];

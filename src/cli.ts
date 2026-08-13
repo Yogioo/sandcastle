@@ -362,7 +362,7 @@ const installTemplateDepsOption = Options.choice("install-template-deps", [
   "false",
 ]).pipe(
   Options.withDescription(
-    "Whether to install the template's host dependencies (e.g. zod for the planner templates)",
+    "Whether to install the template's host dependencies (e.g. zod for structured-output templates)",
   ),
   Options.optional,
 );
@@ -822,10 +822,11 @@ const initCommand = Command.make(
       // steps below both use the right install command.
       const packageManager = yield* detectPackageManager(cwd);
 
-      // If the chosen template imports zod on the host (the planner templates
-      // build their <plan> output schema with it) and the host doesn't already
-      // declare it, offer to install it. Without this, the very first
-      // `npx tsx .sandcastle/main.ts` crashes with ERR_MODULE_NOT_FOUND.
+      // If the chosen template imports zod on the host (planner and
+      // sequential-reviewer templates build structured-output schemas with it)
+      // and the host doesn't already declare it, offer to install it. Without
+      // this, the very first `npx tsx .sandcastle/main.ts` crashes with
+      // ERR_MODULE_NOT_FOUND.
       if (getTemplateDependencies(selectedTemplate).includes("zod")) {
         const alreadyInstalled = yield* hostHasDependency(cwd, "zod");
         if (!alreadyInstalled) {
