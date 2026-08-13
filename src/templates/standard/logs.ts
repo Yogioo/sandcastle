@@ -14,7 +14,7 @@
 // toISOString(), which is UTC and contains colons.
 
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { format } from "node:util";
 
 /** Zero-pad a number to the given width, e.g. padStart(1, 2) === "01". */
@@ -69,7 +69,7 @@ export const pointerLine = (
 export const teeConsole = (logPath: string): (() => void) => {
   const originalLog = console.log.bind(console);
   const originalError = console.error.bind(console);
-  mkdirSync(join(logPath, ".."), { recursive: true });
+  mkdirSync(dirname(logPath), { recursive: true });
   const write = (sink: (...args: unknown[]) => void, args: unknown[]): void => {
     sink(...args);
     appendFileSync(logPath, `${format(...args)}\n`);

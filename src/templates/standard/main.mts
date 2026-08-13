@@ -135,7 +135,7 @@ const probeReadyTasks = (): ReadyProbe => {
     const stdout = execSync(LIST_TASKS_COMMAND, {
       cwd: repoDir,
       encoding: "utf-8",
-      // execSync already runs the command in the platform default shell.
+      // No shell option — execSync already runs in the platform default shell.
       stdio: ["ignore", "pipe", "pipe"],
     });
     return { ok: true, count: parseReadyCount(stdout) };
@@ -148,9 +148,9 @@ const probeReadyTasks = (): ReadyProbe => {
 // ---------------------------------------------------------------------------
 // Logging layout
 // ---------------------------------------------------------------------------
-// One process = one run directory under logs/; one implement→review cycle
-// that actually starts = one loop subdirectory. Nothing is deleted or
-// rotated — pointer lines in main.log map task ids to loop directories.
+// One run directory per process; one loop subdirectory per cycle that
+// actually starts. Nothing is deleted or rotated — pointer lines in
+// main.log map task ids to loop directories.
 
 const logsRoot = join(workflowDir, "logs");
 const runDir = join(
@@ -308,8 +308,7 @@ while (iteration < MAX_ITERATIONS) {
       ` — ${commits.length} commit(s).`,
   );
 
-  // Pointer line: map this cycle's task id to its loop directory. Teed into
-  // main.log by the console patch above.
+  // Pointer line mapping this cycle's task id to its loop directory.
   console.log(
     pointerLine(iteration, loopPadWidth, status, taskId, loopDirName),
   );
