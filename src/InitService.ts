@@ -182,6 +182,10 @@ export const hostHasDependency = (
 
 // ---------------------------------------------------------------------------
 // Agent registry (internal — not part of public API)
+//
+// The built-in agent table in src/templates/standard/recipes/agent/README.md
+// mirrors this registry — keep the recipe in sync when adding or changing an
+// agent here.
 // ---------------------------------------------------------------------------
 
 export interface AgentEntry {
@@ -486,6 +490,10 @@ export const agentSelectOptions = (
 
 // ---------------------------------------------------------------------------
 // Issue tracker registry (internal — not part of public API)
+//
+// The built-in tracker table in
+// src/templates/standard/recipes/issue-tracker/README.md mirrors this
+// registry — keep the recipe in sync when adding or changing a tracker here.
 // ---------------------------------------------------------------------------
 
 export interface IssueTrackerEntry {

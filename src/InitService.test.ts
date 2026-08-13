@@ -477,6 +477,91 @@ describe("InitService scaffold", () => {
       ).resolves.toBeUndefined();
     });
 
+    it("copies the agent and issue-tracker switch recipes", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "standard" });
+
+      const { access } = await import("node:fs/promises");
+      await expect(
+        access(join(dir, ".sandcastle", "recipes", "agent", "README.md")),
+      ).resolves.toBeUndefined();
+      await expect(
+        access(join(dir, ".sandcastle", "recipes", "agent", "factory.mts")),
+      ).resolves.toBeUndefined();
+      await expect(
+        access(
+          join(dir, ".sandcastle", "recipes", "issue-tracker", "README.md"),
+        ),
+      ).resolves.toBeUndefined();
+    });
+
+    it("agent recipe lists every built-in agent factory, install, and env key", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "standard" });
+
+      const readme = await readFile(
+        join(dir, ".sandcastle", "recipes", "agent", "README.md"),
+        "utf-8",
+      );
+      for (const [label, factory, envKey] of [
+        ["Claude Code", "claudeCode", "CLAUDE_CODE_OAUTH_TOKEN"],
+        ["Pi", "pi", "ANTHROPIC_API_KEY"],
+        ["Codex", "codex", "OPENAI_KEY"],
+        ["Cursor", "cursor", "CURSOR_API_KEY"],
+        ["OpenCode", "opencode", "OPENCODE_API_KEY"],
+        ["GitHub Copilot CLI", "copilot", "COPILOT_GITHUB_TOKEN"],
+      ]) {
+        expect(readme).toContain(label);
+        expect(readme).toContain(`\`${factory}\``);
+        expect(readme).toContain(envKey);
+      }
+      // The model is the optional factory argument — one recipe covers both.
+      expect(readme).toContain('factory("model-id")');
+      expect(readme).not.toContain("{{LIST_TASKS_COMMAND}}");
+    });
+
+    it("issue-tracker recipe embeds the built-in trackers' commands", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "standard" });
+
+      const readme = await readFile(
+        join(dir, ".sandcastle", "recipes", "issue-tracker", "README.md"),
+        "utf-8",
+      );
+      expect(readme).toContain(
+        "gh issue list --state open --label Sandcastle --limit 100",
+      );
+      expect(readme).toContain(
+        'gh issue close <ID> --comment "Completed by Sandcastle"',
+      );
+      expect(readme).toContain("bd ready --json");
+      expect(readme).toContain(
+        'bd close <ID> --reason="Completed by Sandcastle"',
+      );
+      expect(readme).toContain("SETUP_ISSUE_TRACKER.md");
+      // Static comparison table — no unresolved template placeholders.
+      expect(readme).not.toContain("{{LIST_TASKS_COMMAND}}");
+    });
+
+    it("AGENTS.md indexes the agent and issue-tracker switch recipes", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "standard" });
+
+      const agentsMd = await readFile(
+        join(dir, ".sandcastle", "AGENTS.md"),
+        "utf-8",
+      );
+      // The feature table indexes all three switch recipes.
+      expect(agentsMd).toContain("`recipes/agent/`");
+      expect(agentsMd).toContain("`recipes/issue-tracker/`");
+      expect(agentsMd).toContain("`recipes/sandbox-provider/`");
+      // The factory guard maps each init choice to its recipe.
+      expect(agentsMd).toContain("`recipes/agent/` (agent or model)");
+      expect(agentsMd).toContain("recipes/issue-tracker/");
+      // The model is covered by the agent recipe, not a recipe of its own.
+      expect(agentsMd).not.toContain("recipes/model/");
+    });
+
     it("substitutes template arguments in recipe prompt files", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "standard" });
