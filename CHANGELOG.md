@@ -1,5 +1,11 @@
 # @yogioo/sandcastle
 
+## 0.15.1
+
+### Patch Changes
+
+- 24b3dcd: Fix `sandcastle init` hanging when the beads issue tracker is selected: pass `--remote=` to `bd init` so it no longer auto-links the git origin as a Dolt remote.
+
 ## 0.15.0
 
 ### Minor Changes
