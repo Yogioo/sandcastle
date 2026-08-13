@@ -1492,6 +1492,8 @@ npm test         # 使用 vitest 运行测试
 npm run typecheck # 类型检查
 ```
 
+发布 npm 包、触发 CI / Release 的流程见 [`docs/releasing.md`](docs/releasing.md)。
+
 ## 许可证
 
 MIT
