@@ -44,6 +44,8 @@ export interface SandboxService {
       cwd?: string;
       sudo?: boolean;
       stdin?: string;
+      /** When aborted, the provider should kill the spawned process tree. */
+      signal?: AbortSignal;
     },
   ) => Effect.Effect<ExecResult, ExecError>;
 
@@ -307,10 +309,7 @@ export const WorktreeDockerSandboxFactory = {
         signal,
         timeouts,
       } = yield* SandboxConfig;
-      const stateDir = resolveRuntimeStateDir(
-        hostRepoDir,
-        configuredStateDir,
-      );
+      const stateDir = resolveRuntimeStateDir(hostRepoDir, configuredStateDir);
 
       const isHeadMode = branchStrategy.type === "head";
       const branch =

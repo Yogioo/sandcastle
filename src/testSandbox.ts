@@ -3,7 +3,7 @@
  * This replaces FilesystemSandbox which has been removed.
  */
 import { Effect } from "effect";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { copyFile, mkdir } from "node:fs/promises";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,6 +12,25 @@ import { createInterface } from "node:readline";
 import { BoundedTail, MAX_TAIL_CHARS } from "./boundedTail.js";
 import { CopyError, ExecError } from "./errors.js";
 import { type ExecResult, type SandboxService } from "./SandboxFactory.js";
+import { killProcessTree } from "./killProcessTree.js";
+
+/**
+ * Wire an AbortSignal to kill the spawned process tree. The listener is
+ * removed once the process closes; aborting after close is a no-op.
+ */
+const wireKillOnAbort = (
+  proc: ChildProcess,
+  signal: AbortSignal | undefined,
+): void => {
+  if (!signal) return;
+  if (signal.aborted) {
+    killProcessTree(proc);
+    return;
+  }
+  const onAbort = () => killProcessTree(proc);
+  signal.addEventListener("abort", onAbort, { once: true });
+  proc.once("close", () => signal.removeEventListener("abort", onAbort));
+};
 
 /**
  * Creates an isolated git global config env so that test sandbox
@@ -39,7 +58,10 @@ export const makeLocalSandbox = (sandboxDir: string): SandboxService => {
             "pipe",
           ],
           env,
+          // POSIX: process-group leader so abort can SIGKILL the whole tree.
+          detached: process.platform !== "win32",
         });
+        wireKillOnAbort(proc, options?.signal);
 
         if (options?.stdin !== undefined) {
           proc.stdin!.write(options.stdin);

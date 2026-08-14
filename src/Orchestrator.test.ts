@@ -165,7 +165,16 @@ const makeTestSandboxFactory = (
  */
 const makeMockAgentLayer = (
   sandboxDir: string,
-  mockAgentBehavior: (sandboxRepoDir: string) => Promise<string>,
+  mockAgentBehavior: (
+    sandboxRepoDir: string,
+    ctx: {
+      /** Stream a raw JSON stream line (e.g. partial progress before a hang). */
+      emitRaw: (line: string) => void;
+      /** The prompt piped to the agent via stdin. */
+      stdin?: string;
+    },
+  ) => Promise<string>,
+  mockOptions?: { exitCode?: number },
 ): SandboxService => {
   const real = makeLocalSandbox(sandboxDir);
 
@@ -176,18 +185,36 @@ const makeMockAgentLayer = (
           const onLine = options.onLine;
           return Effect.gen(function* () {
             const cwd = options?.cwd ?? sandboxDir;
-            const output = yield* Effect.promise(() => mockAgentBehavior(cwd));
+            const output = yield* Effect.promise(() =>
+              mockAgentBehavior(cwd, {
+                emitRaw: (line) => onLine(line),
+                stdin: options?.stdin,
+              }),
+            );
             const streamOutput = toStreamJson(output);
             for (const line of streamOutput.split("\n")) {
               onLine(line);
             }
-            return { stdout: streamOutput, stderr: "", exitCode: 0 };
+            return {
+              stdout: streamOutput,
+              stderr: "",
+              exitCode: mockOptions?.exitCode ?? 0,
+            };
           });
         }
         return Effect.gen(function* () {
           const cwd = options?.cwd ?? sandboxDir;
-          const output = yield* Effect.promise(() => mockAgentBehavior(cwd));
-          return { stdout: output, stderr: "", exitCode: 0 };
+          const output = yield* Effect.promise(() =>
+            mockAgentBehavior(cwd, {
+              emitRaw: () => {},
+              stdin: options?.stdin,
+            }),
+          );
+          return {
+            stdout: output,
+            stderr: "",
+            exitCode: mockOptions?.exitCode ?? 0,
+          };
         });
       }
       return real.exec(command, options);
@@ -2358,6 +2385,7 @@ describe("Orchestrator Display integration", () => {
         iterations: 1,
         prompt: "test",
         idleTimeoutSeconds: 0.1, // 100ms — well below the 2s agent delay with no output
+        agentRestartLimit: 0, // no restarts — assert the pre-restart failure path
       }).pipe(
         Effect.provide(Layer.merge(factoryLayer, testDisplayLayer)),
         Effect.exit,
@@ -2374,6 +2402,217 @@ describe("Orchestrator Display integration", () => {
         expect(err.message).toContain("--idle-timeout");
       }
     }
+  }, 10_000);
+
+  it("restarts the agent after an idle timeout and succeeds on retry", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-restart-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const displayLayer = Layer.merge(
+      SilentDisplay.layer(ref),
+      noopAgentStreamEmitterLayer,
+    );
+
+    let invocationCount = 0;
+    const receivedPrompts: string[] = [];
+    const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
+      hostDir,
+      (dir) =>
+        makeMockAgentLayer(dir, async (_repoDir, ctx) => {
+          invocationCount++;
+          receivedPrompts.push(ctx.stdin ?? "");
+          if (invocationCount === 1) {
+            // Emit partial progress, then go silent past the idle timeout.
+            ctx.emitRaw(
+              JSON.stringify({
+                type: "assistant",
+                message: {
+                  content: [
+                    { type: "text", text: "exploring chest options..." },
+                  ],
+                },
+              }),
+            );
+            ctx.emitRaw(
+              JSON.stringify({ type: "result", result: "partial progress" }),
+            );
+            await new Promise((resolve) => setTimeout(resolve, 800));
+            return "too late";
+          }
+          return "All done. <promise>COMPLETE</promise>";
+        }),
+    );
+
+    const result = await Effect.runPromise(
+      orchestrate({
+        provider: testProvider,
+        hostRepoDir: hostDir,
+
+        iterations: 1,
+        prompt: "do the task",
+        idleTimeoutSeconds: 0.1, // fires 100ms after the last partial line
+        agentRestartDelayMs: 10,
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, displayLayer))),
+    );
+
+    // Retry succeeded with the completion signal.
+    expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
+    expect(invocationCount).toBe(2);
+
+    // The restart prompt carries the previous attempt's output.
+    expect(receivedPrompts[1]).toContain("exploring chest options...");
+    expect(receivedPrompts[1]).toContain("partial progress");
+    expect(receivedPrompts[1]).toContain("previous attempt was terminated");
+
+    // A restart warning was surfaced.
+    const statusEntries = await Effect.runPromise(Ref.get(ref));
+    const restartMessages = statusEntries
+      .filter((e) => e._tag === "status")
+      .map((e) => e.message)
+      .filter((m) => m.includes("restarting"));
+    expect(restartMessages.length).toBe(1);
+    expect(restartMessages[0]).toContain("attempt 2/3");
+  }, 10_000);
+
+  it("fails after exhausting the agent restart limit", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-restart-exhaust-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const displayLayer = Layer.merge(
+      SilentDisplay.layer(ref),
+      noopAgentStreamEmitterLayer,
+    );
+
+    let invocationCount = 0;
+    const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
+      hostDir,
+      (dir) =>
+        makeMockAgentLayer(dir, async () => {
+          invocationCount++;
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          return "never";
+        }),
+    );
+
+    const exitResult = await Effect.runPromise(
+      orchestrate({
+        provider: testProvider,
+        hostRepoDir: hostDir,
+
+        iterations: 1,
+        prompt: "test",
+        idleTimeoutSeconds: 0.1,
+        agentRestartLimit: 2, // 2 restarts = 3 attempts
+        agentRestartDelayMs: 10,
+      }).pipe(
+        Effect.provide(Layer.merge(factoryLayer, displayLayer)),
+        Effect.exit,
+      ),
+    );
+
+    expect(exitResult._tag).toBe("Failure");
+    if (exitResult._tag === "Failure") {
+      const err = Cause.squash(exitResult.cause);
+      expect(err).toBeInstanceOf(AgentIdleTimeoutError);
+    }
+    expect(invocationCount).toBe(3);
+
+    const statusEntries = await Effect.runPromise(Ref.get(ref));
+    const restartMessages = statusEntries
+      .filter((e) => e._tag === "status")
+      .map((e) => e.message)
+      .filter((m) => m.includes("restarting"));
+    expect(restartMessages.length).toBe(2);
+  }, 10_000);
+
+  it("agentRestartLimit 0 disables restarts", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-restart-off-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    let invocationCount = 0;
+    const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
+      hostDir,
+      (dir) =>
+        makeMockAgentLayer(dir, async () => {
+          invocationCount++;
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          return "never";
+        }),
+    );
+
+    const exitResult = await Effect.runPromise(
+      orchestrate({
+        provider: testProvider,
+        hostRepoDir: hostDir,
+
+        iterations: 1,
+        prompt: "test",
+        idleTimeoutSeconds: 0.1,
+        agentRestartLimit: 0,
+        agentRestartDelayMs: 10,
+      }).pipe(
+        Effect.provide(Layer.merge(factoryLayer, testDisplayLayer)),
+        Effect.exit,
+      ),
+    );
+
+    expect(exitResult._tag).toBe("Failure");
+    if (exitResult._tag === "Failure") {
+      const err = Cause.squash(exitResult.cause);
+      expect(err).toBeInstanceOf(AgentIdleTimeoutError);
+    }
+    expect(invocationCount).toBe(1);
+  }, 10_000);
+
+  it("does not restart the agent on a non-zero exit (AgentError)", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-restart-err-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    let invocationCount = 0;
+    const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
+      hostDir,
+      (dir) =>
+        makeMockAgentLayer(
+          dir,
+          async () => {
+            invocationCount++;
+            return "boom";
+          },
+          { exitCode: 1 },
+        ),
+    );
+
+    const exitResult = await Effect.runPromise(
+      orchestrate({
+        provider: testProvider,
+        hostRepoDir: hostDir,
+
+        iterations: 1,
+        prompt: "test",
+        idleTimeoutSeconds: 10,
+        agentRestartLimit: 2,
+      }).pipe(
+        Effect.provide(Layer.merge(factoryLayer, testDisplayLayer)),
+        Effect.exit,
+      ),
+    );
+
+    expect(exitResult._tag).toBe("Failure");
+    if (exitResult._tag === "Failure") {
+      const err = Cause.squash(exitResult.cause);
+      expect(err).toBeInstanceOf(AgentError);
+    }
+    expect(invocationCount).toBe(1);
   }, 10_000);
 
   it("resets the idle timer on each text/tool_call output", async () => {
@@ -3969,6 +4208,7 @@ describe("Orchestrator completion timeout (hanging process)", () => {
         prompt: "do some work",
         idleTimeoutSeconds: 0.15, // 150ms — fires because no signal was seen
         completionTimeoutSeconds: 0.05, // would-be grace window, must not apply
+        agentRestartLimit: 0, // assert the idle fall-through without restarts
       }).pipe(
         Effect.provide(Layer.merge(factoryLayer, testDisplayLayer)),
         Effect.exit,

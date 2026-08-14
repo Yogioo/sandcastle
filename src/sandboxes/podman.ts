@@ -11,6 +11,7 @@ import {
   execFileSync,
   spawn,
   type StdioOptions,
+  type ChildProcess,
 } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
@@ -31,7 +32,26 @@ import {
   processFileMountParents,
 } from "../mountUtils.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
+import { killProcessTree } from "../killProcessTree.js";
 import { registerShutdown } from "../shutdownRegistry.js";
+
+/**
+ * Wire an AbortSignal to kill the spawned process tree. The listener is
+ * removed once the process closes; aborting after close is a no-op.
+ */
+const wireKillOnAbort = (
+  proc: ChildProcess,
+  signal: AbortSignal | undefined,
+): void => {
+  if (!signal) return;
+  if (signal.aborted) {
+    killProcessTree(proc);
+    return;
+  }
+  const onAbort = () => killProcessTree(proc);
+  signal.addEventListener("abort", onAbort, { once: true });
+  proc.once("close", () => signal.removeEventListener("abort", onAbort));
+};
 
 export interface PodmanOptions {
   /** Podman image name (default: derived from repo directory name). */

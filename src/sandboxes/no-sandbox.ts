@@ -11,7 +11,11 @@
  * permissions themselves.
  */
 
-import { spawn, type StdioOptions } from "node:child_process";
+import {
+  spawn,
+  type StdioOptions,
+  type ChildProcess,
+} from "node:child_process";
 import { createInterface } from "node:readline";
 import type {
   NoSandboxProvider,
@@ -20,6 +24,25 @@ import type {
   InteractiveExecOptions,
 } from "../SandboxProvider.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
+import { killProcessTree } from "../killProcessTree.js";
+
+/**
+ * Wire an AbortSignal to kill the spawned process tree. The listener is
+ * removed once the process closes; aborting after close is a no-op.
+ */
+const wireKillOnAbort = (
+  proc: ChildProcess,
+  signal: AbortSignal | undefined,
+): void => {
+  if (!signal) return;
+  if (signal.aborted) {
+    killProcessTree(proc);
+    return;
+  }
+  const onAbort = () => killProcessTree(proc);
+  signal.addEventListener("abort", onAbort, { once: true });
+  proc.once("close", () => signal.removeEventListener("abort", onAbort));
+};
 
 export interface NoSandboxOptions {
   /** Environment variables injected by this provider. Merged at launch time. */
@@ -61,6 +84,7 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
           cwd?: string;
           sudo?: boolean;
           stdin?: string;
+          signal?: AbortSignal;
         },
       ): Promise<ExecResult> => {
         // sudo is a no-op for no-sandbox — the user is already on the host
@@ -85,7 +109,11 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
               "pipe",
             ],
             windowsVerbatimArguments: isWindows,
+            // POSIX: make the child a process-group leader so killProcessTree
+            // can SIGKILL the whole tree via kill(-pid).
+            detached: !isWindows,
           });
+          wireKillOnAbort(proc, opts?.signal);
 
           if (opts?.stdin !== undefined) {
             proc.stdin!.write(opts.stdin);
@@ -149,7 +177,9 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
             env: processEnv,
             stdio: [opts.stdin, opts.stdout, opts.stderr] as StdioOptions,
             shell: process.platform === "win32",
+            detached: process.platform !== "win32",
           });
+          wireKillOnAbort(proc, opts.signal);
 
           proc.on("error", (error: Error) => {
             reject(new Error(`exec failed: ${error.message}`));

@@ -18,6 +18,8 @@ export interface InteractiveExecOptions {
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
   readonly cwd?: string;
+  /** When aborted, the provider should kill the spawned process tree. */
+  readonly signal?: AbortSignal;
 }
 
 /** Handle to a running bind-mount sandbox. */
@@ -35,6 +37,12 @@ export interface BindMountSandboxHandle {
    *
    * When `stdin` is set, the implementation pipes the string to the child
    * process's stdin and closes it. This avoids the Linux 128 KB per-arg limit.
+   *
+   * When `signal` is provided and aborts, the implementation MUST kill the
+   * spawned process tree (children included) so no orphaned agent processes
+   * outlive the execution. Providers that cannot reach the remote process
+   * (SDK-based isolated providers) may ignore it — run-level teardown still
+   * reaps the sandbox.
    */
   exec(
     command: string,
@@ -43,6 +51,7 @@ export interface BindMountSandboxHandle {
       cwd?: string;
       sudo?: boolean;
       stdin?: string;
+      signal?: AbortSignal;
     },
   ): Promise<ExecResult>;
   /**
@@ -112,6 +121,12 @@ export interface IsolatedSandboxHandle {
    *
    * When `stdin` is set, the implementation pipes the string to the child
    * process's stdin and closes it. This avoids the Linux 128 KB per-arg limit.
+   *
+   * When `signal` is provided and aborts, the implementation MUST kill the
+   * spawned process tree (children included) so no orphaned agent processes
+   * outlive the execution. Providers that cannot reach the remote process
+   * (SDK-based isolated providers) may ignore it — run-level teardown still
+   * reaps the sandbox.
    */
   exec(
     command: string,
@@ -120,6 +135,7 @@ export interface IsolatedSandboxHandle {
       cwd?: string;
       sudo?: boolean;
       stdin?: string;
+      signal?: AbortSignal;
     },
   ): Promise<ExecResult>;
   /**
@@ -204,6 +220,10 @@ export interface NoSandboxHandle {
    *
    * When `stdin` is set, the implementation pipes the string to the child
    * process's stdin and closes it. This avoids the Linux 128 KB per-arg limit.
+   *
+   * When `signal` is provided and aborts, the implementation MUST kill the
+   * spawned process tree (children included) so no orphaned agent processes
+   * outlive the execution.
    */
   exec(
     command: string,
@@ -212,6 +232,7 @@ export interface NoSandboxHandle {
       cwd?: string;
       sudo?: boolean;
       stdin?: string;
+      signal?: AbortSignal;
     },
   ): Promise<ExecResult>;
   /**

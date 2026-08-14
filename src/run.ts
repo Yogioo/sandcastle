@@ -390,6 +390,19 @@ export interface RunOptions<A extends AgentProvider = AgentProvider> {
   /** Idle timeout in seconds. If the agent produces no output for this long, it fails. Default: 600 (10 minutes) */
   readonly idleTimeoutSeconds?: number;
   /**
+   * Max automatic restarts of the agent process after an idle timeout.
+   * Each restart force-kills the hung process tree and re-launches the agent
+   * with the previous attempt's output appended to the prompt, so progress
+   * made before the hang is not lost. Default: 2 (3 attempts total).
+   * Set to 0 to fail immediately on the first idle timeout.
+   */
+  readonly agentRestartLimit?: number;
+  /**
+   * Delay between restart attempts in milliseconds. Default: 15000 (15s).
+   * @internal Mostly for tests; the default is fine for real runs.
+   */
+  readonly agentRestartDelayMs?: number;
+  /**
    * Grace window in seconds after a completion signal is observed in the
    * agent's output. The agent process is expected to exit shortly after
    * emitting the signal; if it does not (typically because a spawned child —
@@ -771,6 +784,8 @@ export async function run(
       completionSignal: options.completionSignal,
       idleTimeoutSeconds: options.idleTimeoutSeconds,
       completionTimeoutSeconds: options.completionTimeoutSeconds,
+      agentRestartLimit: options.agentRestartLimit,
+      agentRestartDelayMs: options.agentRestartDelayMs,
       name: options.name,
       resumeSession: options.resumeSession,
       forkSession: options.forkSession,

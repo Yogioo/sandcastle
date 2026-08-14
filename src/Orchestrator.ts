@@ -19,6 +19,33 @@ export type { ParsedStreamEvent, IterationUsage } from "./AgentProvider.js";
 
 const IDLE_WARNING_INTERVAL_MS = 60_000;
 
+const DEFAULT_AGENT_RESTART_LIMIT = 2;
+const DEFAULT_AGENT_RESTART_DELAY_MS = 15_000;
+const CARRYOVER_MAX_LINES = 200;
+const CARRYOVER_MAX_CHARS = 16_000;
+
+/** Tail of a failed attempt's output, injected into the restart prompt. */
+const buildCarryOver = (output: string): string => {
+  const tail = output.split("\n").slice(-CARRYOVER_MAX_LINES).join("\n");
+  return tail.length > CARRYOVER_MAX_CHARS
+    ? `…${tail.slice(-CARRYOVER_MAX_CHARS)}`
+    : tail;
+};
+
+/** Restart prompt: original prompt + the previous attempt's output. */
+const buildRestartPrompt = (
+  originalPrompt: string,
+  previousOutput: string,
+  idleTimeoutMs: number,
+): string => {
+  const carryOver = buildCarryOver(previousOutput);
+  const progress =
+    carryOver.trim() === ""
+      ? "(the previous attempt produced no output before it was terminated)"
+      : carryOver;
+  return `${originalPrompt}\n\n<previous_attempt>\nYour previous attempt was terminated because no output was received for ${idleTimeoutMs / 1000} seconds (idle timeout), and the process was killed. Your session context is gone, but the workspace state persists. Continue the task from where you left off — do not redo work that was already completed or verified.\n\nLast output from the previous attempt:\n---\n${progress}\n---\n</previous_attempt>`;
+};
+
 const invokeAgent = (
   sandbox: SandboxService,
   sandboxRepoDir: string,
@@ -36,210 +63,258 @@ const invokeAgent = (
   resumeSession?: string,
   forkSession?: boolean,
   signal?: AbortSignal,
+  restartLimit: number = DEFAULT_AGENT_RESTART_LIMIT,
+  restartDelayMs: number = DEFAULT_AGENT_RESTART_DELAY_MS,
+  onRestart: (attempt: number, maxAttempts: number) => void = () => {},
 ): Effect.Effect<
   { result: string; sessionId?: string; usage?: IterationUsage },
   SandboxError
 > =>
   Effect.gen(function* () {
-    let resultText = "";
-    let sessionId: string | undefined;
-    let usage: IterationUsage | undefined;
-    // Accumulated text/result output, scanned for the completion signal so a
+    // Accumulated output of the *previous* attempt, consumed to build the
+    // restart prompt and reset at the start of each attempt. Within an attempt
+    // it also holds the text/result scanned for the completion signal so a
     // hanging process can be force-completed once the signal is in the buffer
     // (see ADR 0019).
     let accumulatedOutput = "";
+    const maxAttempts = restartLimit + 1;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const attemptPrompt =
+        attempt === 1
+          ? prompt
+          : buildRestartPrompt(prompt, accumulatedOutput, idleTimeoutMs);
+      accumulatedOutput = "";
+      let resultText = "";
+      let sessionId: string | undefined;
+      let usage: IterationUsage | undefined;
 
-    // Deferred that fails when the idle timer fires (no signal seen).
-    const timeoutSignal = yield* Deferred.make<never, AgentIdleTimeoutError>();
-    // Deferred that resolves successfully when the completion-grace timer
-    // fires (signal seen but process hasn't exited). Resolving lets the race
-    // hand control back to the orchestrator with the buffered output, which
-    // still contains the signal so the existing completionSignal check works.
-    const completionTimeoutDeferred = yield* Deferred.make<
-      { result: string; sessionId?: string; usage?: IterationUsage },
-      never
-    >();
-    let timeoutFiber: Fiber.RuntimeFiber<unknown, unknown> | null = null;
-    let completionDetected = false;
+      // Deferred that fails when the idle timer fires (no signal seen).
+      const timeoutSignal = yield* Deferred.make<
+        never,
+        AgentIdleTimeoutError
+      >();
+      // Deferred that resolves successfully when the completion-grace timer
+      // fires (signal seen but process hasn't exited). Resolving lets the race
+      // hand control back to the orchestrator with the buffered output, which
+      // still contains the signal so the existing completionSignal check works.
+      const completionTimeoutDeferred = yield* Deferred.make<
+        { result: string; sessionId?: string; usage?: IterationUsage },
+        never
+      >();
+      let timeoutFiber: Fiber.RuntimeFiber<unknown, unknown> | null = null;
+      let completionDetected = false;
 
-    // Periodic idle warning state
-    let warningFiber: Fiber.RuntimeFiber<unknown, unknown> | null = null;
-    let idleMinuteCounter = 0;
+      // Periodic idle warning state
+      let warningFiber: Fiber.RuntimeFiber<unknown, unknown> | null = null;
+      let idleMinuteCounter = 0;
 
-    const interruptFiber = (
-      fiber: Fiber.RuntimeFiber<unknown, unknown> | null,
-    ) => {
-      if (fiber !== null) Effect.runFork(Fiber.interrupt(fiber));
-    };
-
-    const startWarningInterval = () => {
-      interruptFiber(warningFiber);
-      idleMinuteCounter = 0;
-      warningFiber = Effect.runFork(
-        Effect.gen(function* () {
-          while (true) {
-            yield* Effect.sleep(Duration.millis(idleWarningIntervalMs));
-            idleMinuteCounter++;
-            onIdleWarning(idleMinuteCounter);
-          }
-        }),
-      );
-    };
-
-    const resetTimer = () => {
-      interruptFiber(timeoutFiber);
-      if (completionDetected) {
-        // Post-signal grace window — successful resolution on expiry.
-        timeoutFiber = Effect.runFork(
-          Effect.gen(function* () {
-            yield* Effect.sleep(Duration.millis(completionTimeoutMs));
-            onCompletionTimeout(completionTimeoutMs);
-            yield* Deferred.succeed(completionTimeoutDeferred, {
-              result: resultText || accumulatedOutput,
-              sessionId,
-              usage,
-            });
-          }),
-        );
-      } else {
-        // Pre-signal idle window — failure on expiry.
-        timeoutFiber = Effect.runFork(
-          Effect.gen(function* () {
-            yield* Effect.sleep(Duration.millis(idleTimeoutMs));
-            yield* Deferred.fail(
-              timeoutSignal,
-              new AgentIdleTimeoutError({
-                message: `Agent idle for ${idleTimeoutMs / 1000} seconds — no output received. Consider increasing the idle timeout with --idle-timeout.`,
-                timeoutMs: idleTimeoutMs,
-              }),
-            );
-          }),
-        );
-        // Reset warning interval on activity, idle-phase only.
-        startWarningInterval();
-      }
-    };
-
-    // Deferred that will be resolved (as a defect) when the AbortSignal fires.
-    // Uses Effect.die so the abort reason propagates as-is to run().
-    const abortDeferred = yield* Deferred.make<never, never>();
-    let abortCleanup: (() => void) | null = null;
-    if (signal) {
-      if (signal.aborted) {
-        return yield* Effect.die(signal.reason);
-      }
-      const onAbort = () => {
-        Effect.runFork(Deferred.die(abortDeferred, signal.reason));
+      const interruptFiber = (
+        fiber: Fiber.RuntimeFiber<unknown, unknown> | null,
+      ) => {
+        if (fiber !== null) Effect.runFork(Fiber.interrupt(fiber));
       };
-      signal.addEventListener("abort", onAbort, { once: true });
-      abortCleanup = () => signal.removeEventListener("abort", onAbort);
-    }
 
-    resetTimer();
-
-    const execEffect = Effect.gen(function* () {
-      const printCmd = provider.buildPrintCommand({
-        prompt,
-        dangerouslySkipPermissions: true,
-        resumeSession,
-        forkSession,
-      });
-      const execResult = yield* sandbox.exec(printCmd.command, {
-        onLine: (line) => {
-          // Surface the raw line FIRST so verbose mode/forwarders see every
-          // stdout line the agent produced, including ones parseStreamLine
-          // drops. Errors thrown by the callback are caught by the emitter
-          // layer; isolate the parser path here so a broken forwarder cannot
-          // skip parsing.
-          try {
-            onRawLine(line);
-          } catch {
-            // Swallow — must not skip parsing/timer logic below.
-          }
-          for (const parsed of provider.parseStreamLine(line)) {
-            if (parsed.type === "text") {
-              onText(parsed.text);
-              accumulatedOutput += parsed.text;
-            } else if (parsed.type === "result") {
-              resultText = parsed.result;
-              accumulatedOutput += parsed.result;
-            } else if (parsed.type === "tool_call") {
-              onToolCall(parsed.name, parsed.args);
-            } else if (parsed.type === "session_id") {
-              sessionId = parsed.sessionId;
-            } else if (parsed.type === "usage") {
-              usage = parsed.usage;
+      const startWarningInterval = () => {
+        interruptFiber(warningFiber);
+        idleMinuteCounter = 0;
+        warningFiber = Effect.runFork(
+          Effect.gen(function* () {
+            while (true) {
+              yield* Effect.sleep(Duration.millis(idleWarningIntervalMs));
+              idleMinuteCounter++;
+              onIdleWarning(idleMinuteCounter);
             }
+          }),
+        );
+      };
+
+      const resetTimer = () => {
+        interruptFiber(timeoutFiber);
+        if (completionDetected) {
+          // Post-signal grace window — successful resolution on expiry.
+          timeoutFiber = Effect.runFork(
+            Effect.gen(function* () {
+              yield* Effect.sleep(Duration.millis(completionTimeoutMs));
+              onCompletionTimeout(completionTimeoutMs);
+              yield* Deferred.succeed(completionTimeoutDeferred, {
+                result: resultText || accumulatedOutput,
+                sessionId,
+                usage,
+              });
+            }),
+          );
+        } else {
+          // Pre-signal idle window — failure on expiry.
+          timeoutFiber = Effect.runFork(
+            Effect.gen(function* () {
+              yield* Effect.sleep(Duration.millis(idleTimeoutMs));
+              yield* Deferred.fail(
+                timeoutSignal,
+                new AgentIdleTimeoutError({
+                  message: `Agent idle for ${idleTimeoutMs / 1000} seconds — no output received. Consider increasing the idle timeout with --idle-timeout.`,
+                  timeoutMs: idleTimeoutMs,
+                }),
+              );
+            }),
+          );
+          // Reset warning interval on activity, idle-phase only.
+          startWarningInterval();
+        }
+      };
+
+      // Deferred that will be resolved (as a defect) when the AbortSignal fires.
+      // Uses Effect.die so the abort reason propagates as-is to run().
+      const abortDeferred = yield* Deferred.make<never, never>();
+      let abortCleanup: (() => void) | null = null;
+      if (signal) {
+        if (signal.aborted) {
+          return yield* Effect.die(signal.reason);
+        }
+        const onAbort = () => {
+          Effect.runFork(Deferred.die(abortDeferred, signal.reason));
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        abortCleanup = () => signal.removeEventListener("abort", onAbort);
+      }
+
+      // Abort controller wired into exec: whenever this attempt's fiber is
+      // abandoned (idle timeout, completion-grace resolution, outer abort), the
+      // exec layer kills the agent process tree so no orphaned processes
+      // survive the timeout (see killProcessTree).
+      const abortController = new AbortController();
+      resetTimer();
+
+      const execEffect = Effect.gen(function* () {
+        const printCmd = provider.buildPrintCommand({
+          prompt: attemptPrompt,
+          dangerouslySkipPermissions: true,
+          resumeSession,
+          forkSession,
+        });
+        const execResult = yield* sandbox.exec(printCmd.command, {
+          onLine: (line) => {
+            // Surface the raw line FIRST so verbose mode/forwarders see every
+            // stdout line the agent produced, including ones parseStreamLine
+            // drops. Errors thrown by the callback are caught by the emitter
+            // layer; isolate the parser path here so a broken forwarder cannot
+            // skip parsing.
+            try {
+              onRawLine(line);
+            } catch {
+              // Swallow — must not skip parsing/timer logic below.
+            }
+            for (const parsed of provider.parseStreamLine(line)) {
+              if (parsed.type === "text") {
+                onText(parsed.text);
+                accumulatedOutput += parsed.text;
+              } else if (parsed.type === "result") {
+                resultText = parsed.result;
+                accumulatedOutput += parsed.result;
+              } else if (parsed.type === "tool_call") {
+                onToolCall(parsed.name, parsed.args);
+              } else if (parsed.type === "session_id") {
+                sessionId = parsed.sessionId;
+              } else if (parsed.type === "usage") {
+                usage = parsed.usage;
+              }
+            }
+            // Check for the completion signal AFTER parsing this line so the
+            // accumulator contains everything seen so far. Flip to the
+            // completion-grace timer the first time the signal appears.
+            if (
+              !completionDetected &&
+              completionSignals.some((sig) => accumulatedOutput.includes(sig))
+            ) {
+              completionDetected = true;
+              interruptFiber(warningFiber);
+              warningFiber = null;
+            }
+            resetTimer();
+          },
+          cwd: sandboxRepoDir,
+          stdin: printCmd.stdin,
+          signal: abortController.signal,
+        });
+
+        if (execResult.exitCode !== 0) {
+          // Prefer stderr; fall back to resultText (from parsed stream events),
+          // then to the tail of raw stdout (last 20 non-empty lines).
+          let errorDetail = execResult.stderr;
+          if (!errorDetail.trim()) {
+            errorDetail = resultText;
           }
-          // Check for the completion signal AFTER parsing this line so the
-          // accumulator contains everything seen so far. Flip to the
-          // completion-grace timer the first time the signal appears.
-          if (
-            !completionDetected &&
-            completionSignals.some((sig) => accumulatedOutput.includes(sig))
-          ) {
-            completionDetected = true;
+          if (!errorDetail.trim()) {
+            const lines = execResult.stdout.split("\n").filter((l) => l.trim());
+            errorDetail = lines.slice(-20).join("\n");
+          }
+          return yield* Effect.fail(
+            new AgentError({
+              message: `${provider.name} exited with code ${execResult.exitCode}:\n${errorDetail}`,
+            }),
+          );
+        }
+
+        return { result: resultText || execResult.stdout, sessionId, usage };
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            interruptFiber(timeoutFiber);
+            timeoutFiber = null;
             interruptFiber(warningFiber);
             warningFiber = null;
-          }
-          resetTimer();
-        },
-        cwd: sandboxRepoDir,
-        stdin: printCmd.stdin,
-      });
-
-      if (execResult.exitCode !== 0) {
-        // Prefer stderr; fall back to resultText (from parsed stream events),
-        // then to the tail of raw stdout (last 20 non-empty lines).
-        let errorDetail = execResult.stderr;
-        if (!errorDetail.trim()) {
-          errorDetail = resultText;
-        }
-        if (!errorDetail.trim()) {
-          const lines = execResult.stdout.split("\n").filter((l) => l.trim());
-          errorDetail = lines.slice(-20).join("\n");
-        }
-        return yield* Effect.fail(
-          new AgentError({
-            message: `${provider.name} exited with code ${execResult.exitCode}:\n${errorDetail}`,
           }),
+        ),
+        Effect.onInterrupt(() => Effect.sync(() => abortController.abort())),
+      );
+
+      let raced: Effect.Effect<
+        { result: string; sessionId?: string; usage?: IterationUsage },
+        AgentIdleTimeoutError | SandboxError
+      > = Effect.raceFirst(execEffect, Deferred.await(timeoutSignal));
+      raced = Effect.raceFirst(
+        raced,
+        Deferred.await(completionTimeoutDeferred),
+      );
+      if (signal) {
+        raced = Effect.raceFirst(
+          raced,
+          Deferred.await(abortDeferred) as Effect.Effect<never, never>,
         );
       }
 
-      return { result: resultText || execResult.stdout, sessionId, usage };
-    }).pipe(
-      Effect.ensuring(
-        Effect.sync(() => {
-          interruptFiber(timeoutFiber);
-          timeoutFiber = null;
-          interruptFiber(warningFiber);
-          warningFiber = null;
-        }),
-      ),
-    );
-
-    let raced: Effect.Effect<
-      { result: string; sessionId?: string; usage?: IterationUsage },
-      AgentIdleTimeoutError | SandboxError
-    > = Effect.raceFirst(execEffect, Deferred.await(timeoutSignal));
-    raced = Effect.raceFirst(raced, Deferred.await(completionTimeoutDeferred));
-    if (signal) {
-      raced = Effect.raceFirst(
-        raced,
-        Deferred.await(abortDeferred) as Effect.Effect<never, never>,
+      const outcome = yield* Effect.either(
+        raced.pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              interruptFiber(timeoutFiber);
+              timeoutFiber = null;
+              interruptFiber(warningFiber);
+              warningFiber = null;
+            }),
+          ),
+        ),
       );
+      if (outcome._tag === "Right") {
+        abortCleanup?.();
+        return outcome.right;
+      }
+      const error = outcome.left;
+      if (error instanceof AgentIdleTimeoutError && attempt < maxAttempts) {
+        // The process tree was already killed via the abort signal; carry the
+        // attempt's output into the next attempt's prompt and retry.
+        onRestart(attempt + 1, maxAttempts);
+        yield* Effect.sleep(Duration.millis(restartDelayMs));
+        continue;
+      }
+      abortCleanup?.();
+      return yield* Effect.fail(error);
     }
-
-    return yield* raced.pipe(
-      Effect.ensuring(
-        Effect.sync(() => {
-          abortCleanup?.();
-          interruptFiber(timeoutFiber);
-          timeoutFiber = null;
-          interruptFiber(warningFiber);
-          warningFiber = null;
-        }),
-      ),
+    // Unreachable — the loop only exits via return above.
+    return yield* Effect.fail(
+      new AgentIdleTimeoutError({
+        message: "unreachable",
+        timeoutMs: idleTimeoutMs,
+      }),
     );
   });
 
@@ -257,6 +332,19 @@ export interface OrchestrateOptions {
   readonly completionSignal?: string | string[];
   /** Idle timeout in seconds. If the agent produces no output for this long, it fails with AgentIdleTimeoutError. Default: 600 (10 minutes) */
   readonly idleTimeoutSeconds?: number;
+  /**
+   * Max automatic restarts of the agent process after an idle timeout.
+   * Each restart re-launches the agent with the previous attempt's output
+   * appended to the prompt, so progress made before the hang is not lost.
+   * The process tree is force-killed before every restart. Default: 2
+   * (3 attempts total). Set to 0 to fail immediately on the first timeout.
+   */
+  readonly agentRestartLimit?: number;
+  /**
+   * Delay between restart attempts, in milliseconds. Default: 15000 (15s).
+   * @internal Mostly for tests; the default is fine for real runs.
+   */
+  readonly agentRestartDelayMs?: number;
   /**
    * Grace window in seconds after a completion signal is observed in the
    * agent's output. The agent process is expected to exit shortly after
@@ -323,6 +411,10 @@ export const orchestrate = (
   const completionTimeoutMs =
     (options.completionTimeoutSeconds ?? DEFAULT_COMPLETION_TIMEOUT_SECONDS) *
     1000;
+  const agentRestartLimit =
+    options.agentRestartLimit ?? DEFAULT_AGENT_RESTART_LIMIT;
+  const agentRestartDelayMs =
+    options.agentRestartDelayMs ?? DEFAULT_AGENT_RESTART_DELAY_MS;
   return Effect.gen(function* () {
     const factory = yield* SandboxFactory;
     const display = yield* Display;
@@ -492,6 +584,18 @@ export const orchestrate = (
                   iterationResumeSession,
                   iterationForkSession,
                   options.signal,
+                  agentRestartLimit,
+                  agentRestartDelayMs,
+                  (attempt, maxAttempts) => {
+                    Effect.runPromise(
+                      display.status(
+                        label(
+                          `Agent idle — killing and restarting (attempt ${attempt}/${maxAttempts}) with carried-over context.`,
+                        ),
+                        "warn",
+                      ),
+                    );
+                  },
                 );
 
                 // Flush any remaining buffered text deltas

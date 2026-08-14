@@ -111,6 +111,29 @@ describe("noSandbox", () => {
       },
     );
 
+    it("exec kills the process tree when the abort signal fires", async () => {
+      const provider = noSandbox();
+      const handle = await provider.create({
+        worktreePath: process.cwd(),
+        env: {},
+      });
+
+      // Long-running command (ping on Windows, sleep on POSIX).
+      const command =
+        process.platform === "win32" ? "ping -n 30 127.0.0.1 >nul" : "sleep 30";
+      const controller = new AbortController();
+      const start = Date.now();
+      const resultPromise = handle.exec(command, {
+        signal: controller.signal,
+      });
+      setTimeout(() => controller.abort(), 300);
+
+      const result = await resultPromise;
+      // Killed long before the command would have finished on its own.
+      expect(Date.now() - start).toBeLessThan(5000);
+      expect(result.exitCode).not.toBe(0);
+    });
+
     itPosix(
       "interactiveExec spawns process and returns exit code",
       async () => {
