@@ -9,6 +9,7 @@
  */
 
 import { access, readdir } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join, posix, relative } from "node:path";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 
@@ -59,7 +60,7 @@ export const claudeHostSessionPath = (
   projectsDir?: string,
 ): string => {
   const base =
-    projectsDir ?? join(process.env.HOME ?? "~", ".claude", "projects");
+    projectsDir ?? join(homedir(), ".claude", "projects");
   return join(base, encodeProjectPath(cwd), `${id}.jsonl`);
 };
 
@@ -93,7 +94,7 @@ export const claudeSubagentsDirOnHost = (
   projectsDir?: string,
 ): string => {
   const base =
-    projectsDir ?? join(process.env.HOME ?? "~", ".claude", "projects");
+    projectsDir ?? join(homedir(), ".claude", "projects");
   return join(base, encodeProjectPath(cwd), id, "subagents");
 };
 
@@ -133,7 +134,7 @@ export const findClaudeSessionOnHost = async (
   projectsDir?: string,
 ): Promise<HostSessionLookup> => {
   const root =
-    projectsDir ?? join(process.env.HOME ?? "~", ".claude", "projects");
+    projectsDir ?? join(homedir(), ".claude", "projects");
   let entries;
   try {
     entries = await readdir(root, { withFileTypes: true });
@@ -236,7 +237,7 @@ export const findCodexSessionOnHost = async (
   sessionsDir?: string,
 ): Promise<HostSessionLookup> => {
   const root =
-    sessionsDir ?? join(process.env.HOME ?? "~", ".codex", "sessions");
+    sessionsDir ?? join(homedir(), ".codex", "sessions");
   const path = await findCodexSessionPath(root, id);
   return { path, searchedRoot: root };
 };
@@ -252,7 +253,7 @@ export const locateCodexHostSession = async (
   sessionsDir?: string,
 ): Promise<CodexSessionLocation> => {
   const root =
-    sessionsDir ?? join(process.env.HOME ?? "~", ".codex", "sessions");
+    sessionsDir ?? join(homedir(), ".codex", "sessions");
   const path = await findCodexSessionPath(root, id);
   if (!path) throw new Error(`session ${id} not found in ${root}`);
   return { path, relativePath: relative(root, path) };
@@ -303,7 +304,7 @@ export const encodePiSessionDir = (cwd: string): string => {
 /** Absolute host path to the pi session directory for a given cwd. */
 export const piSessionDirPath = (cwd: string, sessionsDir?: string): string => {
   const base =
-    sessionsDir ?? join(process.env.HOME ?? "~", ".pi", "agent", "sessions");
+    sessionsDir ?? join(homedir(), ".pi", "agent", "sessions");
   return join(base, encodePiSessionDir(cwd));
 };
 
@@ -349,7 +350,7 @@ export const findPiSessionOnHost = async (
   sessionsDir?: string,
 ): Promise<HostSessionLookup> => {
   const root =
-    sessionsDir ?? join(process.env.HOME ?? "~", ".pi", "agent", "sessions");
+    sessionsDir ?? join(homedir(), ".pi", "agent", "sessions");
   const found = await findPiSessionPath(root, id);
   return { path: found?.path, searchedRoot: root };
 };
@@ -365,7 +366,7 @@ export const locatePiHostSession = async (
   sessionsDir?: string,
 ): Promise<PiSessionLocation> => {
   const root =
-    sessionsDir ?? join(process.env.HOME ?? "~", ".pi", "agent", "sessions");
+    sessionsDir ?? join(homedir(), ".pi", "agent", "sessions");
   const found = await findPiSessionPath(root, id);
   if (!found) throw new Error(`session ${id} not found in ${root}`);
   return found;

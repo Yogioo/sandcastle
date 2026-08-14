@@ -1,6 +1,6 @@
 import { mkdir, readFile, rm, writeFile, access } from "node:fs/promises";
 import { dirname, join, posix } from "node:path";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import {
   claudeHostSessionPath,
   claudeSandboxSessionPath,
@@ -502,7 +502,7 @@ const makeCodexSessionStorage = (
       const jsonl = await readSandboxFile(handle, located.path, "codex-cap");
       const rewritten = transferCodexSession(jsonl, sandboxCwd, hostCwd);
       const root =
-        hostSessionsDir ?? join(process.env.HOME ?? "~", ".codex", "sessions");
+        hostSessionsDir ?? join(homedir(), ".codex", "sessions");
       const target = join(root, located.relativePath);
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, rewritten);
