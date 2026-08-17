@@ -886,9 +886,16 @@ export async function run(
   // Extract structured output after the iteration completes (separate pass from completion signal)
   if (options.output) {
     // Structured output runs are single-iteration, so the last iteration is the
-    // one that produced this stdout. Carry its session id onto the error so a
-    // caller can resume the same session to re-emit corrected output.
+    // one that produced this stdout. Carry its session id onto the error only
+    // when the provider can resume — non-resumable agents (cursor, …) may still
+    // emit a stream session id, but resumeSession would throw.
     const lastIteration = baseResult.iterations.at(-1);
+    const resumableSession = provider.sessionStorage
+      ? {
+          sessionId: lastIteration?.sessionId,
+          sessionFilePath: lastIteration?.sessionFilePath,
+        }
+      : {};
     try {
       const output = await extractStructuredOutput(
         baseResult.stdout,
@@ -897,8 +904,7 @@ export async function run(
           commits: baseResult.commits,
           branch: baseResult.branch,
           preservedWorktreePath: baseResult.preservedWorktreePath,
-          sessionId: lastIteration?.sessionId,
-          sessionFilePath: lastIteration?.sessionFilePath,
+          ...resumableSession,
         },
       );
       return { ...baseResult, output };

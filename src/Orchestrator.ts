@@ -239,6 +239,7 @@ const invokeAgent = (
           },
           cwd: sandboxRepoDir,
           stdin: printCmd.stdin,
+          argv: printCmd.argv,
           signal: abortController.signal,
         });
 

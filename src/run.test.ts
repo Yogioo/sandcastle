@@ -1176,6 +1176,24 @@ describe("structured output error carries the failed session id", () => {
       expect(soe.rawMatched).toBe("not valid json");
     }
   });
+
+  it("omits sessionId on StructuredOutputError for non-resumable providers", async () => {
+    try {
+      await run({
+        agent: cursor(),
+        sandbox: sessionEmittingSandbox,
+        prompt: "emit your answer inside <result> tags",
+        branchStrategy: { type: "head" },
+        output: Output.object({ tag: "result", schema: mockSchema() }),
+      });
+      expect.unreachable("should have thrown StructuredOutputError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(StructuredOutputError);
+      const soe = err as StructuredOutputError;
+      expect(soe.sessionId).toBeUndefined();
+      expect(soe.rawMatched).toBe("not valid json");
+    }
+  });
 });
 
 describe("RunOptions with output", () => {

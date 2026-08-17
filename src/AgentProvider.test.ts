@@ -1111,6 +1111,24 @@ describe("cursor factory", () => {
     expect(stdin).toBeUndefined();
   });
 
+  it("buildPrintCommand returns direct node argv on Windows when Cursor is installed", () => {
+    if (process.platform !== "win32") return;
+    const provider = cursor("claude-sonnet-4-6");
+    const prompt = "# Context\n\n## Open issues\n\nhello";
+    const { command, argv } = provider.buildPrintCommand(opts(prompt));
+    expect(command).toContain("agent --print");
+    expect(argv).toBeDefined();
+    expect(argv![0]!.toLowerCase()).toContain("node.exe");
+    expect(argv![1]!.toLowerCase()).toContain("index.js");
+    expect(argv).toContain("--print");
+    expect(argv).toContain("--output-format");
+    expect(argv).toContain("stream-json");
+    expect(argv).toContain("--model");
+    expect(argv).toContain("claude-sonnet-4-6");
+    expect(argv).toContain("--force");
+    expect(argv![argv!.length - 1]).toBe(prompt);
+  });
+
   it("buildPrintCommand rejects prompts larger than the argv-safe limit", () => {
     const provider = cursor("claude-sonnet-4-6");
     const huge = "x".repeat(120 * 1024 + 1);

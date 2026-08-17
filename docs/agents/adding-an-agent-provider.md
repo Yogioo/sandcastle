@@ -133,8 +133,8 @@ Before writing code, **verify session-ID round-trip stability empirically**: run
 
 ### Patterns to follow
 
-- **Shell-escape every interpolated value** in `buildPrintCommand` using the `shellEscape` helper at the top of `AgentProvider.ts`. Safe identifiers (`claude-sonnet-4-6`, `opencode/big-pickle`) are left unquoted so Windows no-sandbox (`cmd.exe`) does not pass the quotes through to the agent. The model argument is optional — omit `--model` / `-m` when the caller does not pass one, so the agent's CLI default is used.
-- **Prefer stdin for the prompt** to dodge the argv size limit.
+- **Shell-escape every interpolated value** in `buildPrintCommand` using the `shellEscape` helper at the top of `AgentProvider.ts`. Safe identifiers (`claude-sonnet-4-6`, `opencode/big-pickle`) are left unquoted so model ids stay portable when Windows no-sandbox falls back to `cmd.exe` (no Git Bash). Prefer Git Bash on Windows so POSIX single-quotes work for multiline prompts. The model argument is optional — omit `--model` / `-m` when the caller does not pass one, so the agent's CLI default is used.
+- **Prefer stdin for the prompt** to dodge the argv size limit. Cursor cannot take stdin — on Windows it also returns `argv` pointing at `node.exe`+`index.js` so no-sandbox can bypass the `agent.cmd` `%*` mangler.
 - **Be defensive when parsing JSON.** Wrap `JSON.parse` in try/catch and tolerate unknown event types — CLIs add fields over time.
 - **Surface errors as `result` events** when the CLI emits them on stdout (see Codex/Pi). The Orchestrator's stderr-empty fallback uses these to show the user something useful.
 

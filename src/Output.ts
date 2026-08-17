@@ -134,15 +134,20 @@ export interface StructuredOutputErrorOptions {
  * so callers can decide recovery without losing the run's side effects.
  *
  * It also carries `sessionId` (and `sessionFilePath` when the session was
- * captured to the host) of the iteration that produced the bad output, so a
- * caller can resume that same session and ask the agent to re-emit corrected
- * output:
+ * captured to the host) of the iteration that produced the bad output, but
+ * only when the agent provider supports resume (`sessionStorage` set). A
+ * caller can then resume that same session and ask the agent to re-emit
+ * corrected output:
  *
  * ```ts
  * try {
  *   return await run({ ...opts, output });
  * } catch (e) {
- *   if (e instanceof StructuredOutputError && e.sessionId) {
+ *   if (
+ *     e instanceof StructuredOutputError &&
+ *     e.sessionId &&
+ *     opts.agent.sessionStorage
+ *   ) {
  *     return await run({
  *       ...opts,
  *       output,

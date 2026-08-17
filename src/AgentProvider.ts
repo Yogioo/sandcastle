@@ -1,6 +1,7 @@
 import { mkdir, readFile, rm, writeFile, access } from "node:fs/promises";
 import { dirname, join, posix } from "node:path";
 import { tmpdir, homedir } from "node:os";
+import { resolveCursorAgentEntry } from "./windowsHostShell.js";
 import {
   claudeHostSessionPath,
   claudeSandboxSessionPath,
@@ -39,17 +40,17 @@ export type ParsedStreamEvent =
   | { type: "usage"; usage: IterationUsage };
 
 /**
- * Identifiers that are safe unquoted in both POSIX `sh -c` and Windows
- * `cmd.exe`. Includes `/` so models like `opencode/big-pickle` stay
- * unquoted; excludes cmd.exe/sh metacharacters (`& | < > ^ % ! ; " ' space`).
+ * Identifiers that are safe unquoted in both POSIX `sh -c` / Git Bash and
+ * Windows `cmd.exe`. Includes `/` so models like `opencode/big-pickle` stay
+ * unquoted; excludes shell metacharacters (`& | < > ^ % ! ; " ' space`).
  */
 const SAFE_SHELL_ARG = /^[A-Za-z0-9._/+-]+$/;
 
 /**
- * Quote a value interpolated into a POSIX `sh -c` command string.
+ * Quote a value interpolated into a POSIX `sh -c` / Git Bash command string.
  *
- * Safe identifiers are left unquoted so the same command also works on
- * Windows no-sandbox, which runs through cmd.exe. cmd.exe does not treat
+ * Safe identifiers are left unquoted so model ids stay portable when a
+ * Windows host falls back to cmd.exe (no Git Bash). cmd.exe does not treat
  * single quotes as quoting, so `'claude-sonnet-4-6'` would be forwarded
  * to the agent as a literal model name including the quotes.
  */
@@ -247,10 +248,14 @@ export interface AgentCommandOptions {
 
 /** Return type of buildPrintCommand — command string plus optional stdin content.
  *  When `stdin` is set, the sandbox pipes it to the child process's stdin
- *  instead of inlining the prompt in argv, avoiding the Linux 128 KB per-arg limit. */
+ *  instead of inlining the prompt in argv, avoiding the Linux 128 KB per-arg limit.
+ *  When `argv` is set, no-sandbox spawns that argv directly (no shell). Container
+ *  sandboxes ignore `argv` and run `command` inside the Linux image. */
 export interface PrintCommand {
   readonly command: string;
   readonly stdin?: string;
+  /** Direct argv for host no-sandbox (bypasses shell / `.cmd` wrappers). */
+  readonly argv?: readonly string[];
 }
 
 /** Per-iteration token usage snapshot extracted from the agent session. */
@@ -894,10 +899,29 @@ export const cursor = (
   }: AgentCommandOptions): PrintCommand {
     assertCursorPrintPromptFitsArgv(prompt);
     const forceFlag = dangerouslySkipPermissions ? " --force" : "";
+    const command = `agent --print --output-format stream-json${printModelFlag("--model", model)}${forceFlag} ${shellEscape(prompt)}`;
 
-    return {
-      command: `agent --print --output-format stream-json${printModelFlag("--model", model)}${forceFlag} ${shellEscape(prompt)}`,
-    };
+    // Windows `agent.cmd` forwards args through `%*` / PowerShell and truncates
+    // multiline prompts. Prefer a direct node.exe argv for no-sandbox; keep
+    // `command` for Linux containers (docker/podman), which ignore `argv`.
+    if (process.platform === "win32") {
+      const entry = resolveCursorAgentEntry();
+      if (entry) {
+        const argv = [
+          entry.nodePath,
+          entry.indexPath,
+          "--print",
+          "--output-format",
+          "stream-json",
+        ];
+        if (model) argv.push("--model", model);
+        if (dangerouslySkipPermissions) argv.push("--force");
+        argv.push(prompt);
+        return { command, argv };
+      }
+    }
+
+    return { command };
   },
 
   buildInteractiveArgs({

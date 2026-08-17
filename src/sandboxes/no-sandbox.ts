@@ -25,6 +25,7 @@ import type {
 } from "../SandboxProvider.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
 import { killProcessTree } from "../killProcessTree.js";
+import { resolveWindowsHostShell } from "../windowsHostShell.js";
 
 /**
  * Wire an AbortSignal to kill the spawned process tree. The listener is
@@ -58,6 +59,19 @@ export interface NoSandboxOptions {
   readonly maxOutputTailChars?: number;
 }
 
+type ExecOptions = {
+  onLine?: (line: string) => void;
+  cwd?: string;
+  sudo?: boolean;
+  stdin?: string;
+  signal?: AbortSignal;
+  /**
+   * Direct argv spawn (no shell). Used on Windows for Cursor Agent so the
+   * prompt is not mangled by `agent.cmd` / cmd.exe quoting.
+   */
+  argv?: readonly string[];
+};
+
 /**
  * Create a no-sandbox provider.
  *
@@ -73,46 +87,55 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
     const worktreePath = createOptions.worktreePath;
     const processEnv = { ...process.env, ...createOptions.env };
     const maxOutputTailChars = options?.maxOutputTailChars ?? MAX_TAIL_CHARS;
+    const isWindows = process.platform === "win32";
+    const windowsShell = isWindows
+      ? resolveWindowsHostShell(processEnv)
+      : undefined;
 
     const handle: NoSandboxHandle = {
       worktreePath,
 
-      exec: (
-        command: string,
-        opts?: {
-          onLine?: (line: string) => void;
-          cwd?: string;
-          sudo?: boolean;
-          stdin?: string;
-          signal?: AbortSignal;
-        },
-      ): Promise<ExecResult> => {
+      exec: (command: string, opts?: ExecOptions): Promise<ExecResult> => {
         // sudo is a no-op for no-sandbox — the user is already on the host
         const cwd = opts?.cwd ?? worktreePath;
-        const isWindows = process.platform === "win32";
-        // PowerShell and cmd.exe don't ship `sh`, so on Windows route the
-        // command string through cmd.exe instead. `/d` skips AutoRun, `/s`
-        // preserves the quoted command verbatim, `/c` runs it and exits.
-        // `windowsVerbatimArguments` keeps Node from re-quoting our args.
-        const shellCmd = isWindows ? "cmd.exe" : "sh";
-        const shellArgs = isWindows
-          ? ["/d", "/s", "/c", command]
-          : ["-c", command];
+        const argv = opts?.argv;
 
         return new Promise((resolve, reject) => {
-          const proc = spawn(shellCmd, shellArgs, {
-            cwd,
-            env: processEnv,
-            stdio: [
-              opts?.stdin !== undefined ? "pipe" : "ignore",
-              "pipe",
-              "pipe",
-            ],
-            windowsVerbatimArguments: isWindows,
-            // POSIX: make the child a process-group leader so killProcessTree
-            // can SIGKILL the whole tree via kill(-pid).
-            detached: !isWindows,
-          });
+          const proc = argv
+            ? spawn(argv[0]!, argv.slice(1), {
+                cwd,
+                env: processEnv,
+                stdio: [
+                  opts?.stdin !== undefined ? "pipe" : "ignore",
+                  "pipe",
+                  "pipe",
+                ],
+                // Argv mode bypasses the shell; keep the process group semantics
+                // used for killProcessTree on POSIX.
+                detached: !isWindows,
+              })
+            : (() => {
+                // Windows: prefer Git Bash so POSIX shellEscape quoting works
+                // (Cursor / OpenCode / Copilot put prompts on argv). Fall back
+                // to cmd.exe when Git Bash is not installed (issue #800).
+                const shellCmd = windowsShell?.shellCmd ?? "sh";
+                const shellArgs = windowsShell
+                  ? windowsShell.shellArgs(command)
+                  : ["-c", command];
+                return spawn(shellCmd, shellArgs, {
+                  cwd,
+                  env: processEnv,
+                  stdio: [
+                    opts?.stdin !== undefined ? "pipe" : "ignore",
+                    "pipe",
+                    "pipe",
+                  ],
+                  // cmd.exe needs verbatim args; Git Bash does not.
+                  windowsVerbatimArguments:
+                    isWindows && windowsShell !== undefined && !windowsShell.posix,
+                  detached: !isWindows,
+                });
+              })();
           wireKillOnAbort(proc, opts?.signal);
 
           if (opts?.stdin !== undefined) {

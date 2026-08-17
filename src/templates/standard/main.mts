@@ -246,7 +246,14 @@ while (iteration < MAX_ITERATIONS) {
   } catch (error) {
     if (!(error instanceof StructuredOutputError)) throw error;
 
-    if (error.sessionId) {
+    // Non-resumable providers (cursor, opencode, …) may still surface a
+    // sessionId on the stream, but they have no sessionStorage — resume
+    // would throw. Fall back to git commit count instead.
+    const canResume =
+      error.sessionId !== undefined &&
+      implementOpts.agent.sessionStorage !== undefined;
+
+    if (canResume) {
       try {
         const retried = await run({
           ...implementOpts,

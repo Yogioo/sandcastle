@@ -46,6 +46,8 @@ export interface SandboxService {
       stdin?: string;
       /** When aborted, the provider should kill the spawned process tree. */
       signal?: AbortSignal;
+      /** Direct argv spawn — honored by no-sandbox; ignored by containers. */
+      argv?: readonly string[];
     },
   ) => Effect.Effect<ExecResult, ExecError>;
 

@@ -94,20 +94,55 @@ describe("noSandbox", () => {
     });
 
     itWindows(
-      "exec passes env vars to spawned processes (cmd.exe)",
+      "exec passes env vars to spawned processes (Git Bash / POSIX)",
       async () => {
-        // Doubles as the regression test for issue #800: `%VAR%` only expands
-        // when the command runs through cmd.exe — if `exec` were still spawning
-        // `sh -c`, this would either fail with `spawn sh ENOENT` (no `sh` on a
-        // stock Windows PATH) or echo back the literal `%MY_TEST_VAR%`.
+        // With Git Bash preferred over cmd.exe, `$VAR` expands. `%VAR%` would
+        // only work on the cmd.exe fallback path (issue #800 hosts without Git).
         const provider = noSandbox();
         const handle = await provider.create({
           worktreePath: process.cwd(),
           env: { MY_TEST_VAR: "sandcastle_test_value" },
         });
 
-        const result = await handle.exec("echo %MY_TEST_VAR%");
+        const result = await handle.exec("echo $MY_TEST_VAR");
         expect(result.stdout.trim()).toBe("sandcastle_test_value");
+      },
+    );
+
+    itWindows("exec honors argv and bypasses the shell", async () => {
+      const provider = noSandbox();
+      const handle = await provider.create({
+        worktreePath: process.cwd(),
+        env: {},
+      });
+
+      const result = await handle.exec("this-command-must-not-run", {
+        argv: [process.execPath, "-e", "process.stdout.write('argv-ok')"],
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe("argv-ok");
+    });
+
+    itWindows(
+      "exec preserves multiline argv for Cursor-style prompts",
+      async () => {
+        const provider = noSandbox();
+        const handle = await provider.create({
+          worktreePath: process.cwd(),
+          env: {},
+        });
+
+        const prompt = "# Context\n\n## Open issues\n\nhello";
+        const result = await handle.exec("ignored", {
+          argv: [
+            process.execPath,
+            "-e",
+            "process.stdout.write(process.argv[1])",
+            prompt,
+          ],
+        });
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toBe(prompt);
       },
     );
 
@@ -118,9 +153,8 @@ describe("noSandbox", () => {
         env: {},
       });
 
-      // Long-running command (ping on Windows, sleep on POSIX).
-      const command =
-        process.platform === "win32" ? "ping -n 30 127.0.0.1 >nul" : "sleep 30";
+      // Long-running command — sleep works under Git Bash and POSIX.
+      const command = "sleep 30";
       const controller = new AbortController();
       const start = Date.now();
       const resultPromise = handle.exec(command, {

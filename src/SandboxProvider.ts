@@ -52,6 +52,8 @@ export interface BindMountSandboxHandle {
       sudo?: boolean;
       stdin?: string;
       signal?: AbortSignal;
+      /** Direct argv spawn — honored by no-sandbox; ignored by containers. */
+      argv?: readonly string[];
     },
   ): Promise<ExecResult>;
   /**
@@ -136,6 +138,8 @@ export interface IsolatedSandboxHandle {
       sudo?: boolean;
       stdin?: string;
       signal?: AbortSignal;
+      /** Direct argv spawn — honored by no-sandbox; ignored by containers. */
+      argv?: readonly string[];
     },
   ): Promise<ExecResult>;
   /**
@@ -233,6 +237,8 @@ export interface NoSandboxHandle {
       sudo?: boolean;
       stdin?: string;
       signal?: AbortSignal;
+      /** Direct argv spawn — bypasses shell / `.cmd` wrappers on Windows. */
+      argv?: readonly string[];
     },
   ): Promise<ExecResult>;
   /**

@@ -287,6 +287,10 @@ export interface SandboxExecOptions {
   readonly sudo?: boolean;
   /** Stdin payload — piped to the child process and then closed. Avoids the Linux 128 KB per-arg limit. */
   readonly stdin?: string;
+  /** When aborted, the provider should kill the spawned process tree. */
+  readonly signal?: AbortSignal;
+  /** Direct argv spawn — honored by no-sandbox; ignored by containers. */
+  readonly argv?: readonly string[];
 }
 
 /** @internal Context for building Sandbox handle methods. */
