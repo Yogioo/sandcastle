@@ -50,6 +50,16 @@ const buildRestartPrompt = (
   return `${originalPrompt}\n\n<previous_attempt>\nYour previous attempt was terminated because no output was received for ${idleDuration} (idle timeout), and the process was killed. Your session context is gone, but the workspace state persists. Continue the task from where you left off — do not redo work that was already completed or verified.\n\nLast output from the previous attempt:\n---\n${progress}\n---\n</previous_attempt>`;
 };
 
+type InvokeAgentResult = {
+  readonly result: string;
+  readonly sessionId?: string;
+  readonly usage?: IterationUsage;
+  /** Set when the outer AbortSignal won the race; caller must re-throw reason. */
+  readonly aborted?: {
+    readonly reason: unknown;
+  };
+};
+
 const invokeAgent = (
   sandbox: SandboxService,
   sandboxRepoDir: string,
@@ -70,10 +80,8 @@ const invokeAgent = (
   restartLimit: number = DEFAULT_AGENT_RESTART_LIMIT,
   restartDelayMs: number = DEFAULT_AGENT_RESTART_DELAY_MS,
   onRestart: (attempt: number, maxAttempts: number) => void = () => {},
-): Effect.Effect<
-  { result: string; sessionId?: string; usage?: IterationUsage },
-  SandboxError
-> =>
+  onSessionId: (sessionId: string) => void = () => {},
+): Effect.Effect<InvokeAgentResult, SandboxError> =>
   Effect.gen(function* () {
     // Accumulated output of the *previous* attempt, consumed to build the
     // restart prompt and reset at the start of each attempt. Within an attempt
@@ -168,16 +176,24 @@ const invokeAgent = (
         }
       };
 
-      // Deferred that will be resolved (as a defect) when the AbortSignal fires.
-      // Uses Effect.die so the abort reason propagates as-is to run().
-      const abortDeferred = yield* Deferred.make<never, never>();
+      // Deferred that resolves when the AbortSignal fires. We succeed (not
+      // die) so the caller can best-effort captureToHost with the sessionId
+      // already observed on the stream, then re-throw signal.reason (ADR 0004).
+      const abortDeferred = yield* Deferred.make<InvokeAgentResult, never>();
       let abortCleanup: (() => void) | null = null;
       if (signal) {
         if (signal.aborted) {
           return yield* Effect.die(signal.reason);
         }
         const onAbort = () => {
-          Effect.runFork(Deferred.die(abortDeferred, signal.reason));
+          Effect.runFork(
+            Deferred.succeed(abortDeferred, {
+              result: resultText || accumulatedOutput,
+              sessionId,
+              usage,
+              aborted: { reason: signal.reason },
+            }),
+          );
         };
         signal.addEventListener("abort", onAbort, { once: true });
         abortCleanup = () => signal.removeEventListener("abort", onAbort);
@@ -220,6 +236,7 @@ const invokeAgent = (
                 onToolCall(parsed.name, parsed.args);
               } else if (parsed.type === "session_id") {
                 sessionId = parsed.sessionId;
+                onSessionId(parsed.sessionId);
               } else if (parsed.type === "usage") {
                 usage = parsed.usage;
               }
@@ -275,7 +292,7 @@ const invokeAgent = (
       );
 
       let raced: Effect.Effect<
-        { result: string; sessionId?: string; usage?: IterationUsage },
+        InvokeAgentResult,
         AgentIdleTimeoutError | SandboxError
       > = Effect.raceFirst(execEffect, Deferred.await(timeoutSignal));
       raced = Effect.raceFirst(
@@ -283,10 +300,7 @@ const invokeAgent = (
         Deferred.await(completionTimeoutDeferred),
       );
       if (signal) {
-        raced = Effect.raceFirst(
-          raced,
-          Deferred.await(abortDeferred) as Effect.Effect<never, never>,
-        );
+        raced = Effect.raceFirst(raced, Deferred.await(abortDeferred));
       }
 
       const outcome = yield* Effect.either(
@@ -579,6 +593,7 @@ export const orchestrate = (
                   result: agentOutput,
                   sessionId,
                   usage: streamUsage,
+                  aborted,
                 } = yield* invokeAgent(
                   ctx.sandbox,
                   ctx.sandboxRepoDir,
@@ -608,10 +623,45 @@ export const orchestrate = (
                       ),
                     );
                   },
+                  (observedSessionId) => {
+                    Effect.runPromise(
+                      streamEmitter.emit({
+                        type: "sessionId",
+                        sessionId: observedSessionId,
+                        iteration: i,
+                        timestamp: new Date(),
+                      }),
+                    );
+                  },
                 );
 
                 // Flush any remaining buffered text deltas
                 textBuffer.dispose();
+
+                // Best-effort session capture on abort so pause/append can
+                // resumeSession. Always re-throw signal.reason (ADR 0004).
+                if (aborted) {
+                  if (
+                    provider.captureSessions &&
+                    provider.sessionStorage &&
+                    sessionId &&
+                    bindMountHandle
+                  ) {
+                    yield* Effect.promise(() =>
+                      provider
+                        .sessionStorage!.captureToHost({
+                          hostCwd: hostRepoDir,
+                          sandboxCwd: ctx.sandboxRepoDir,
+                          sessionId,
+                          handle: bindMountHandle,
+                        })
+                        .catch(() => {
+                          // Best-effort: capture failure must not mask abort.
+                        }),
+                    );
+                  }
+                  return yield* Effect.die(aborted.reason);
+                }
 
                 yield* display.status(label("Agent stopped"), "info");
 

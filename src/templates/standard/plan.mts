@@ -47,6 +47,14 @@ const MAX_ITERATIONS = 10;
 // 0 = drain-and-stop (exit when there is nothing to run).
 const IDLE_POLL_SECONDS = 30;
 
+// Kill the agent when it produces no output for this many seconds (silent
+// hang). Each output event resets the timer. Omitted or 0 = disabled.
+const AGENT_IDLE_TIMEOUT_SECONDS = 600;
+
+// After an idle timeout, auto-restart with previous output + a timeout note.
+// 2 = up to 3 attempts total. 0 = fail on first idle timeout.
+const AGENT_RESTART_LIMIT = 2;
+
 // Discussion tasks only — never ready tasks. Excludes `planned` parents
 // whose child tasks were already created.
 const LIST_PLANNING_TASKS_COMMAND = "{{LIST_PLANNING_TASKS_COMMAND}}";
@@ -199,6 +207,8 @@ while (iteration < MAX_ITERATIONS) {
     sandbox: docker(),
     promptFile,
     branchStrategy: { type: "head" },
+    idleTimeoutSeconds: AGENT_IDLE_TIMEOUT_SECONDS,
+    agentRestartLimit: AGENT_RESTART_LIMIT,
     logging: {
       type: "file",
       path: join(logsDir, `planning-${padStart(iteration, 2)}-${phase}.log`),

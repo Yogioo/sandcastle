@@ -32,6 +32,13 @@ export type AgentStreamEvent =
       readonly line: string;
       readonly iteration: number;
       readonly timestamp: Date;
+    }
+  | {
+      /** Session id observed on the agent stream (when the provider emits one). */
+      readonly type: "sessionId";
+      readonly sessionId: string;
+      readonly iteration: number;
+      readonly timestamp: Date;
     };
 
 export interface AgentStreamEmitterService {

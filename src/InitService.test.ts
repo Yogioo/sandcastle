@@ -132,6 +132,26 @@ describe("InitService scaffold", () => {
     expect(logs).toContain("uniqueDirName");
   });
 
+  it("copies control plane and viz into standard scaffolds", async () => {
+    const repoDir = await makeDir();
+    const stateDir = join(repoDir, "cache", ".sandcastle");
+
+    await runScaffold(repoDir, {
+      stateDir,
+      templateName: "standard",
+    });
+
+    const main = await readFile(join(stateDir, "main.mts"), "utf-8");
+    expect(main).toContain('from "./control/runtime.js"');
+    expect(main).toContain("startControlServer");
+    expect(main).toContain("runControlled");
+    await access(join(stateDir, "control", "runtime.ts"));
+    await access(join(stateDir, "control", "controller.ts"));
+    await access(join(stateDir, "control", "server.ts"));
+    await access(join(stateDir, "control", "run-controlled.ts"));
+    await access(join(stateDir, "viz", "index.html"));
+  });
+
   it("makes reviewer standards visible without exposing the env file", async () => {
     const repoDir = await makeDir();
     const stateDir = join(repoDir, "cache", ".sandcastle");
@@ -820,6 +840,8 @@ describe("InitService scaffold", () => {
       );
       expect(plan).toContain("probePlanningPhase");
       expect(plan).toContain("while (iteration < MAX_ITERATIONS)");
+      expect(plan).toContain("AGENT_IDLE_TIMEOUT_SECONDS");
+      expect(plan).toContain("idleTimeoutSeconds: AGENT_IDLE_TIMEOUT_SECONDS");
       // Phase isolation: one run() call site, phase selects the prompt —
       // never a single session invoking two skills.
       expect(plan.match(/await run\(/g)).toHaveLength(1);
@@ -980,6 +1002,10 @@ describe("InitService scaffold", () => {
         "utf-8",
       );
       expect(mainTs).toContain("const IDLE_POLL_SECONDS = 30;");
+      expect(mainTs).toContain("AGENT_IDLE_TIMEOUT_SECONDS");
+      expect(mainTs).toContain("AGENT_RESTART_LIMIT");
+      expect(mainTs).toContain("idleTimeoutSeconds: AGENT_IDLE_TIMEOUT_SECONDS");
+      expect(mainTs).toContain("agentRestartLimit: AGENT_RESTART_LIMIT");
       expect(mainTs).toContain("probeReadyTasks");
       expect(mainTs).toContain("while (iteration < MAX_ITERATIONS)");
       expect(mainTs).toContain("iteration += 1");
@@ -1165,6 +1191,8 @@ describe("InitService scaffold", () => {
       const head = next("standard", "main.mts").join("\n");
       expect(head).toContain("IDLE_POLL_SECONDS");
       expect(head).toContain("to 0");
+      expect(head).toContain("AGENT_IDLE_TIMEOUT_SECONDS");
+      expect(head).toContain("AGENT_RESTART_LIMIT");
       expect(head).toContain("AGENTS.md");
       expect(next("blank", "main.mts").join("\n")).not.toContain(
         "IDLE_POLL_SECONDS",

@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sandcastle — implement workflow</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #eceff1;
+        --ink: #1a2332;
+        --muted: #5c6b7a;
+        --line: #c5ced6;
+        --accent: #1f6f8b;
+        --danger: #9b2c2c;
+        --panel: #f7f9fb;
+        --log-bg: #15202b;
+        --log-fg: #e8eef2;
+        font-family: "Source Sans 3", "Segoe UI", sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        min-height: 100vh;
+      }
+      header {
+        padding: 0.85rem 1.1rem;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        gap: 1rem;
+        align-items: baseline;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        background: var(--panel);
+      }
+      h1 {
+        font-size: 1rem;
+        margin: 0;
+        letter-spacing: 0.02em;
+      }
+      .meta {
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+      main {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0.85rem;
+        padding: 0.85rem 1.1rem 1.5rem;
+      }
+      @media (min-width: 960px) {
+        main {
+          grid-template-columns: 260px minmax(0, 1fr);
+          align-items: start;
+        }
+      }
+      .stack {
+        display: grid;
+        gap: 0.85rem;
+        min-width: 0;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        padding: 0.85rem 0.95rem;
+      }
+      .panel h2 {
+        margin: 0 0 0.65rem;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--muted);
+        font-weight: 600;
+      }
+      dl {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 0.3rem 0.65rem;
+        margin: 0;
+        font-size: 0.88rem;
+      }
+      dt {
+        color: var(--muted);
+      }
+      dd {
+        margin: 0;
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        word-break: break-all;
+      }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+        margin-top: 0.9rem;
+      }
+      button {
+        border: 1px solid var(--line);
+        background: white;
+        color: var(--ink);
+        padding: 0.35rem 0.65rem;
+        font: inherit;
+        font-size: 0.85rem;
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: var(--ink);
+      }
+      button.danger {
+        color: var(--danger);
+      }
+      button.accent {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: white;
+      }
+      button.icon {
+        width: 2.4rem;
+        height: 2.4rem;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 0.35rem;
+        flex-shrink: 0;
+      }
+      button.icon svg {
+        width: 1.15rem;
+        height: 1.15rem;
+      }
+
+      /* Board — bd list */
+      .board {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 0.55rem;
+        min-height: 7rem;
+      }
+      .column {
+        background: #e3e8ed;
+        border: 1px solid var(--line);
+        padding: 0.45rem;
+        min-height: 6.5rem;
+      }
+      .column h3 {
+        margin: 0 0 0.45rem;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--muted);
+        font-weight: 600;
+        display: flex;
+        justify-content: space-between;
+        gap: 0.5rem;
+      }
+      .column h3 span {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+      }
+      .card {
+        background: white;
+        border: 1px solid var(--line);
+        padding: 0.4rem 0.45rem;
+        margin-bottom: 0.4rem;
+        font-size: 0.78rem;
+        line-height: 1.35;
+      }
+      .card:last-child {
+        margin-bottom: 0;
+      }
+      .card .id {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        color: var(--accent);
+        font-weight: 600;
+      }
+      .card .badges {
+        color: var(--muted);
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 0.7rem;
+      }
+      .card .title {
+        margin-top: 0.15rem;
+      }
+      .board-empty,
+      .board-error {
+        color: var(--muted);
+        font-size: 0.85rem;
+        padding: 0.5rem 0;
+      }
+      .board-error {
+        color: var(--danger);
+        white-space: pre-wrap;
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 0.78rem;
+      }
+
+      /* Three logs */
+      .logs-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0.55rem;
+      }
+      @media (min-width: 900px) {
+        .logs-grid {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+      }
+      .log-pane h3 {
+        margin: 0 0 0.35rem;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        font-weight: 600;
+      }
+      pre.log {
+        margin: 0;
+        height: 42vh;
+        min-height: 16rem;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 0.72rem;
+        line-height: 1.4;
+        background: var(--log-bg);
+        color: var(--log-fg);
+        padding: 0.65rem;
+      }
+
+      /* Chat-style append under logs */
+      .compose {
+        display: flex;
+        gap: 0.5rem;
+        align-items: flex-end;
+        margin-top: 0.75rem;
+        padding-top: 0.75rem;
+        border-top: 1px solid var(--line);
+      }
+      .compose textarea {
+        flex: 1;
+        min-height: 2.6rem;
+        max-height: 8rem;
+        margin: 0;
+        padding: 0.55rem 0.65rem;
+        border: 1px solid var(--line);
+        background: white;
+        font: inherit;
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 0.85rem;
+        resize: vertical;
+        line-height: 1.35;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Sandcastle · implement workflow</h1>
+      <div class="meta" id="updated">connecting…</div>
+    </header>
+    <main>
+      <section class="panel">
+        <h2>State</h2>
+        <dl id="state">
+          <dt>status</dt>
+          <dd>—</dd>
+        </dl>
+        <div class="controls">
+          <button id="pauseAgent" class="danger">Pause agent</button>
+          <button id="resumeAgent" class="accent">Resume agent</button>
+          <button id="pauseLoop">Pause loop</button>
+          <button id="resumeLoop" class="accent">Resume loop</button>
+        </div>
+      </section>
+
+      <div class="stack">
+        <section class="panel">
+          <h2>Board · bd list</h2>
+          <div id="board" class="board">
+            <div class="board-empty">loading…</div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Logs</h2>
+          <div class="logs-grid">
+            <div class="log-pane">
+              <h3>main</h3>
+              <pre class="log" id="log-main">…</pre>
+            </div>
+            <div class="log-pane">
+              <h3>implement</h3>
+              <pre class="log" id="log-implement">…</pre>
+            </div>
+            <div class="log-pane">
+              <h3>review</h3>
+              <pre class="log" id="log-reviewer">…</pre>
+            </div>
+          </div>
+          <div class="compose">
+            <textarea
+              id="appendText"
+              rows="2"
+              placeholder="Append to current agent (interrupt → resumeSession)…"
+            ></textarea>
+            <button
+              id="appendBtn"
+              class="accent icon"
+              title="Send (Enter)"
+              aria-label="Send append"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+                <path
+                  d="M19 7v6a3 3 0 0 1-3 3H7"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="m10 12-3 4 3 4"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
+        </section>
+      </div>
+    </main>
+    <script>
+      const stateEl = document.getElementById("state");
+      const updatedEl = document.getElementById("updated");
+      const boardEl = document.getElementById("board");
+      const appendText = document.getElementById("appendText");
+      const logEls = {
+        main: document.getElementById("log-main"),
+        implement: document.getElementById("log-implement"),
+        reviewer: document.getElementById("log-reviewer"),
+      };
+      const fields = [
+        "runId",
+        "iteration",
+        "phase",
+        "agent",
+        "status",
+        "sessionId",
+        "taskId",
+        "loopDir",
+      ];
+      const boardColumns = [
+        "open",
+        "in_progress",
+        "blocked",
+        "deferred",
+        "closed",
+      ];
+
+      const renderState = (state) => {
+        stateEl.innerHTML = fields
+          .map(
+            (key) =>
+              `<dt>${key}</dt><dd>${
+                state[key] == null || state[key] === ""
+                  ? "—"
+                  : String(state[key])
+              }</dd>`,
+          )
+          .join("");
+        updatedEl.textContent = state.updatedAt
+          ? `updated ${state.updatedAt}`
+          : "no state yet";
+      };
+
+      const priorityLabel = (priority) => {
+        if (priority == null || priority === "") return null;
+        const text = String(priority);
+        return /^p?\d+$/i.test(text)
+          ? `P${text.replace(/^p/i, "")}`
+          : text;
+      };
+
+      const escapeHtml = (value) =>
+        String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
+
+      const renderBoard = (payload) => {
+        if (!payload || payload.ok === false) {
+          boardEl.innerHTML = `<div class="board-error">${escapeHtml(
+            payload?.error || "bd list failed",
+          )}</div>`;
+          return;
+        }
+        const issues = Array.isArray(payload.issues) ? payload.issues : [];
+        if (issues.length === 0) {
+          boardEl.innerHTML =
+            '<div class="board-empty">No issues from <code>bd list</code>.</div>';
+          return;
+        }
+        const byStatus = new Map(boardColumns.map((status) => [status, []]));
+        const extra = [];
+        for (const issue of issues) {
+          const status = String(issue.status || "open").toLowerCase();
+          if (byStatus.has(status)) byStatus.get(status).push(issue);
+          else extra.push(issue);
+        }
+        const columns = [...boardColumns];
+        if (extra.length) {
+          byStatus.set("other", extra);
+          columns.push("other");
+        }
+        boardEl.innerHTML = columns
+          .map((status) => {
+            const list = byStatus.get(status) || [];
+            const cards = list
+              .map((issue) => {
+                const p = priorityLabel(issue.priority);
+                const type = issue.issue_type ? `[${issue.issue_type}]` : "";
+                const who = issue.assignee ? `@${issue.assignee}` : "";
+                const labels =
+                  Array.isArray(issue.labels) && issue.labels.length
+                    ? `[${issue.labels.join(", ")}]`
+                    : "";
+                const badges = [p ? `[${p}]` : "", type, who, labels]
+                  .filter(Boolean)
+                  .join(" ");
+                return `<article class="card"><div class="id">${escapeHtml(
+                  issue.id,
+                )}</div><div class="badges">${escapeHtml(
+                  badges,
+                )}</div><div class="title">${escapeHtml(
+                  issue.title,
+                )}</div></article>`;
+              })
+              .join("");
+            return `<div class="column"><h3>${escapeHtml(
+              status,
+            )} <span>${list.length}</span></h3>${
+              cards || '<div class="board-empty">—</div>'
+            }</div>`;
+          })
+          .join("");
+      };
+
+      const postJson = async (path, body) => {
+        const res = await fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || res.statusText);
+        }
+      };
+
+      const command = (type, extra = {}) =>
+        postJson("/api/command", { type, ...extra });
+
+      document.getElementById("pauseAgent").onclick = () =>
+        command("pause_agent");
+      document.getElementById("resumeAgent").onclick = () =>
+        command("resume_agent", {
+          prompt: "Continue from where you left off.",
+        });
+      document.getElementById("pauseLoop").onclick = () =>
+        command("pause_loop");
+      document.getElementById("resumeLoop").onclick = () =>
+        command("resume_loop");
+
+      const sendAppend = async () => {
+        const text = appendText.value;
+        if (!text.trim()) return;
+        await postJson("/api/append", { text });
+        appendText.value = "";
+      };
+
+      document.getElementById("appendBtn").onclick = () => void sendAppend();
+      appendText.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          void sendAppend();
+        }
+      });
+
+      const refreshState = async () => {
+        const res = await fetch("/api/state");
+        if (!res.ok) return;
+        renderState(await res.json());
+      };
+
+      const refreshLog = async (name) => {
+        const el = logEls[name];
+        const res = await fetch(`/api/log?name=${encodeURIComponent(name)}`);
+        const atBottom =
+          el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        el.textContent = res.ok
+          ? await res.text()
+          : `(${res.status}) no log yet`;
+        if (atBottom) el.scrollTop = el.scrollHeight;
+      };
+
+      const refreshBoard = async () => {
+        const res = await fetch("/api/board");
+        if (!res.ok) {
+          boardEl.innerHTML = `<div class="board-error">board HTTP ${res.status}</div>`;
+          return;
+        }
+        renderBoard(await res.json());
+      };
+
+      const tick = async () => {
+        try {
+          await Promise.all([
+            refreshState(),
+            refreshLog("main"),
+            refreshLog("implement"),
+            refreshLog("reviewer"),
+            refreshBoard(),
+          ]);
+        } catch {
+          updatedEl.textContent = "poll failed — is the workflow running?";
+        }
+      };
+
+      void tick();
+      setInterval(() => void tick(), 800);
+    </script>
+  </body>
+</html>

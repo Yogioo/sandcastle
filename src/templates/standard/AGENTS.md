@@ -31,6 +31,28 @@ Apply a feature by reading that recipe folder (short README + sliced reference c
 
 Do not add **planner** on **head**. Parallel execute needs a named **branch** and `createSandbox` per issue. Follow `recipes/worktree/` first, then `recipes/planner/`. Parallel-with-review is worktree + planner; review is already in **standard**.
 
+## Agent idle timeout (silent hang → restart)
+
+Both root entries enable Sandcastle's built-in idle kill + restart:
+
+- `AGENT_IDLE_TIMEOUT_SECONDS` (default `600`) — no agent output for this long kills the process tree. Output events reset the timer; long commands that still stream are not cut.
+- `AGENT_RESTART_LIMIT` (default `2`) — after a kill, re-launch with the previous attempt's output and a timeout note. Workspace state persists; the agent session is not resumed. `0` fails on the first idle timeout.
+
+Tune the constants in `main.ts` / `main.mts` and `plan.ts` / `plan.mts`. This is not a workflow feature recipe.
+
+## Control plane + viz (implement workflow)
+
+The **implement workflow** writes a file-based control plane under `runtime/` and serves a tiny viz on `127.0.0.1` (URL printed at startup):
+
+| Path | Role |
+| ---- | ---- |
+| `runtime/state.json` | phase / agent / status / sessionId / log paths |
+| `runtime/events.jsonl` | **agent stream events** (optional) |
+| `runtime/inbox/append.txt` | write text → abort current agent, then **session resume** with that prompt |
+| `runtime/commands.jsonl` | append one JSON line: `pause_agent`, `resume_agent`, `pause_loop`, `resume_loop` |
+
+Open the printed viz URL, or POST `/api/command` / `/api/append`. The viz shows a `bd list` board, three log panes (main / implement / review) at once, and a chat-style append box under the logs. Append and pause are crude interrupts (kill process + resume), not mid-stream stdin inject. Requires a filesystem-backed **agent session** provider (e.g. Claude Code). The board endpoint runs `bd list --json` on the host repo.
+
 ## Strip review
 
 **standard** includes review. There is no simple-loop recipe. To drop the review phase:

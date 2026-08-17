@@ -34,6 +34,8 @@ try {
     maxIterations: 1,
     agent: sandcastle.claudeCode(),
     promptFile: join(workflowDir, "implement-prompt.md"),
+    idleTimeoutSeconds: 600,
+    agentRestartLimit: 2,
   });
 
   if (implement.commits.length > 0) {
@@ -45,6 +47,8 @@ try {
       promptArgs: {
         BRANCH: branch,
       },
+      idleTimeoutSeconds: 600,
+      agentRestartLimit: 2,
     });
   }
 } finally {

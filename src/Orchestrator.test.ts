@@ -1241,6 +1241,76 @@ describe("Orchestrator agent stream emitter", () => {
     expect(toolCallEvents[0]!.timestamp).toBeInstanceOf(Date);
   });
 
+  it("emits sessionId events when the stream includes a session_id", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-stream-sid-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const events: AgentStreamEvent[] = [];
+    const emitterLayer = agentStreamEmitterLayer((e) => {
+      events.push(e);
+    });
+
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const real = makeLocalSandbox(dir);
+      return {
+        exec: (command, options) => {
+          if (command.startsWith("claude ") && options?.onLine) {
+            const onLine = options.onLine;
+            const lines = [
+              JSON.stringify({
+                type: "system",
+                subtype: "init",
+                session_id: "stream-session-xyz",
+              }),
+              JSON.stringify({
+                type: "result",
+                result: "<promise>COMPLETE</promise>",
+              }),
+            ];
+            for (const line of lines) onLine(line);
+            return Effect.succeed({
+              stdout: lines.join("\n"),
+              stderr: "",
+              exitCode: 0,
+            });
+          }
+          return real.exec(command, options);
+        },
+        copyIn: (hostPath, sandboxPath) => real.copyIn(hostPath, sandboxPath),
+        copyFileOut: (sandboxPath, hostPath) =>
+          real.copyFileOut(sandboxPath, hostPath),
+      };
+    });
+
+    await Effect.runPromise(
+      orchestrate({
+        provider: testProvider,
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: "do work",
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            factoryLayer,
+            SilentDisplay.layer(
+              Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]),
+            ),
+            emitterLayer,
+          ),
+        ),
+      ),
+    );
+
+    const sessionEvents = events.filter((e) => e.type === "sessionId");
+    expect(sessionEvents).toHaveLength(1);
+    expect(sessionEvents[0]).toMatchObject({
+      type: "sessionId",
+      sessionId: "stream-session-xyz",
+      iteration: 1,
+    });
+  });
+
   it("swallows errors thrown by the callback", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "orch-stream-err-"));
     await initRepo(hostDir);
@@ -3480,10 +3550,19 @@ describe("Session capture integration", () => {
                   const onLine = options.onLine;
                   return Effect.gen(function* () {
                     const cwd = options?.cwd ?? sandboxBaseDir;
+                    // Emit session_id before the mock body so a mid-run abort
+                    // still observes it for best-effort captureToHost.
+                    onLine(
+                      JSON.stringify({
+                        type: "system",
+                        subtype: "init",
+                        session_id: sessionId,
+                      }),
+                    );
                     const output = yield* Effect.promise(() =>
                       mockAgentBehavior(cwd),
                     );
-                    const streamOutput = toStreamJson(output, sessionId);
+                    const streamOutput = toStreamJson(output);
                     for (const line of streamOutput.split("\n")) {
                       onLine(line);
                     }
@@ -3991,6 +4070,86 @@ describe("Session capture integration", () => {
     );
 
     expect(result.iterations[0]!.usage).toBeUndefined();
+  });
+
+  it("best-effort captures session on abort so resumeSession can find it", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-abort-capture-host-"));
+    const hostProjectsDir = await mkdtemp(
+      join(tmpdir(), "orch-abort-capture-projects-"),
+    );
+    const sandboxProjectsDir = await mkdtemp(
+      join(tmpdir(), "orch-abort-capture-sb-projects-"),
+    );
+    const provider = claudeCode("test-model", {
+      sessionStorage: { hostProjectsDir, sandboxProjectsDir },
+    });
+    const mockSessionId = "abort-capture-session-1";
+    const ac = new AbortController();
+    let phase: "abort" | "resume" = "abort";
+    let resumed = false;
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const { factoryLayer } = makeSessionCaptureFactory(
+      hostDir,
+      async (repoDir) => {
+        if (phase === "resume") {
+          resumed = true;
+          return "Resumed. <promise>COMPLETE</promise>";
+        }
+        const encoded = encodeProjectPath(repoDir);
+        const sessionsDir = join(sandboxProjectsDir, encoded);
+        await mkdir(sessionsDir, { recursive: true });
+        await writeFile(
+          join(sessionsDir, `${mockSessionId}.jsonl`),
+          [
+            JSON.stringify({ type: "system", cwd: repoDir }),
+            JSON.stringify({ type: "message", cwd: repoDir, text: "partial" }),
+          ].join("\n"),
+        );
+        // session_id was already streamed; abort mid-run before exit.
+        ac.abort("pause for append");
+        await new Promise((r) => setTimeout(r, 50));
+        return "should not complete";
+      },
+      mockSessionId,
+    );
+
+    await expect(
+      Effect.runPromise(
+        orchestrate({
+          provider,
+          hostRepoDir: hostDir,
+          iterations: 1,
+          prompt: "do some work",
+          signal: ac.signal,
+        }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      ),
+    ).rejects.toThrow("pause for append");
+
+    // captureToHost should have copied the sandbox session onto the host.
+    const hostSessionPath = provider.sessionStorage.hostSessionFilePath(
+      hostDir,
+      mockSessionId,
+    );
+    expect(existsSync(hostSessionPath)).toBe(true);
+    const captured = await readFile(hostSessionPath, "utf-8");
+    expect(captured).toContain("partial");
+
+    phase = "resume";
+    const result = await Effect.runPromise(
+      orchestrate({
+        provider,
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: "append: continue",
+        resumeSession: mockSessionId,
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(resumed).toBe(true);
+    expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
   });
 });
 

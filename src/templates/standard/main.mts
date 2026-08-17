@@ -39,9 +39,13 @@ import {
 import { docker } from "@yogioo/sandcastle/sandboxes/docker";
 import { execSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { createLoopController } from "./control/controller.js";
+import { runControlled } from "./control/run-controlled.js";
+import { createRuntime } from "./control/runtime.js";
+import { startControlServer } from "./control/server.js";
 import {
   iterationPadWidth,
   localTimestamp,
@@ -101,6 +105,16 @@ const LIST_TASKS_COMMAND = "{{LIST_TASKS_COMMAND}}";
 // not be repaired by a session resume. Prevents a broken prompt from burning
 // the full iteration budget.
 const MAX_OUTCOME_FAILURES = 3;
+
+// Kill the agent when it produces no output for this many seconds (silent
+// hang — e.g. a stuck bash command). Each output event resets the timer.
+// Omitted or 0 = disabled (library default).
+const AGENT_IDLE_TIMEOUT_SECONDS = 600;
+
+// After an idle timeout, auto-restart the agent with the previous attempt's
+// output + a timeout note (workspace state kept; session context is not
+// resumed). 2 = up to 3 attempts total. 0 = fail on first idle timeout.
+const AGENT_RESTART_LIMIT = 2;
 
 // Add a sandbox.onSandboxReady install command if you need a
 // package-manager install after the sandbox is ready — there is no default.
@@ -167,6 +181,20 @@ const loopPadWidth = iterationPadWidth(MAX_ITERATIONS);
 teeConsole(mainLogPath);
 
 // ---------------------------------------------------------------------------
+// Control plane + viz (file-based under runtime/, tiny localhost HTTP)
+// ---------------------------------------------------------------------------
+
+const runId = basename(runDir);
+const runtime = createRuntime(workflowDir, runId, {
+  mainLog: mainLogPath,
+  vizDir: join(workflowDir, "viz"),
+});
+const controller = createLoopController(runtime);
+const controlServer = await startControlServer(runtime, { repoDir });
+console.log(`Control viz: ${controlServer.url}`);
+console.log(`Control files: ${runtime.paths.root}`);
+
+// ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
 
@@ -174,6 +202,8 @@ let consecutiveOutcomeFailures = 0;
 let iteration = 0;
 
 while (iteration < MAX_ITERATIONS) {
+  await controller.waitWhileLoopPaused();
+
   const probed = probeReadyTasks();
   if (!probed.ok && IDLE_POLL_SECONDS > 0) {
     console.log(
@@ -222,9 +252,19 @@ while (iteration < MAX_ITERATIONS) {
     sandbox: docker(),
     promptFile: join(workflowDir, "implement-prompt.md"),
     branchStrategy: { type: "head" as const },
+    idleTimeoutSeconds: AGENT_IDLE_TIMEOUT_SECONDS,
+    agentRestartLimit: AGENT_RESTART_LIMIT,
     output: outcomeOutput(),
     logging: { type: "file" as const, path: join(loopDir, "implement.log") },
   };
+
+  runtime.writeState({
+    iteration,
+    loopDir,
+    implementLog: implementOpts.logging.path,
+    reviewerLog: null,
+    taskId: null,
+  });
 
   // -----------------------------------------------------------------------
   // Phase 1: Implement
@@ -237,50 +277,95 @@ while (iteration < MAX_ITERATIONS) {
   let taskId: string | undefined;
   let commits: { sha: string }[];
 
-  try {
-    const implement = await run(implementOpts);
-    status = implement.output.status;
-    taskId = implement.output.taskId;
-    commits = implement.commits;
-    consecutiveOutcomeFailures = 0;
-  } catch (error) {
-    if (!(error instanceof StructuredOutputError)) throw error;
+  const implementResult = await runControlled({
+    controller,
+    runtime,
+    agent: "implementer",
+    phase: "implement",
+    statePatch: {
+      iteration,
+      loopDir,
+      implementLog: implementOpts.logging.path,
+    },
+    promptFile: implementOpts.promptFile,
+    execute: async (ctrl) => {
+      const logging = {
+        type: "file" as const,
+        path: implementOpts.logging.path,
+        onAgentStreamEvent: ctrl.onAgentStreamEvent,
+      };
+      const base = {
+        ...implementOpts,
+        signal: ctrl.signal,
+        logging,
+        ...(ctrl.resumeSession
+          ? {
+              resumeSession: ctrl.resumeSession,
+              prompt: ctrl.prompt,
+              promptFile: undefined,
+            }
+          : ctrl.prompt
+            ? { prompt: ctrl.prompt, promptFile: undefined }
+            : {}),
+      };
 
-    // Non-resumable providers (cursor, opencode, …) may still surface a
-    // sessionId on the stream, but they have no sessionStorage — resume
-    // would throw. Fall back to git commit count instead.
-    const canResume =
-      error.sessionId !== undefined &&
-      implementOpts.agent.sessionStorage !== undefined;
-
-    if (canResume) {
       try {
-        const retried = await run({
-          ...implementOpts,
-          prompt: outcomeRetryPrompt(error),
-          promptFile: undefined,
-          resumeSession: error.sessionId,
-        });
-        status = retried.output.status;
-        taskId = retried.output.taskId;
-        commits = retried.commits;
+        const implement = await run(base);
         consecutiveOutcomeFailures = 0;
-      } catch (retryError) {
-        if (!(retryError instanceof StructuredOutputError)) throw retryError;
-        console.error(
-          `Implementer <outcome> still invalid after resume: ${retryError.message}`,
-        );
-        ({ status, commits } = fallbackOutcome(retryError.commits));
-        if (status === "blocked") consecutiveOutcomeFailures++;
+        return {
+          status: implement.output.status as Outcome["status"],
+          taskId: implement.output.taskId as string | undefined,
+          commits: implement.commits,
+        };
+      } catch (error) {
+        if (!(error instanceof StructuredOutputError)) throw error;
+
+        const canResume =
+          error.sessionId !== undefined &&
+          implementOpts.agent.sessionStorage !== undefined;
+
+        if (canResume) {
+          try {
+            const retried = await run({
+              ...base,
+              prompt: outcomeRetryPrompt(error),
+              promptFile: undefined,
+              resumeSession: error.sessionId,
+            });
+            consecutiveOutcomeFailures = 0;
+            return {
+              status: retried.output.status as Outcome["status"],
+              taskId: retried.output.taskId as string | undefined,
+              commits: retried.commits,
+            };
+          } catch (retryError) {
+            if (!(retryError instanceof StructuredOutputError)) throw retryError;
+            console.error(
+              `Implementer <outcome> still invalid after resume: ${retryError.message}`,
+            );
+            const fallback = fallbackOutcome(retryError.commits);
+            if (fallback.status === "blocked") consecutiveOutcomeFailures++;
+            else consecutiveOutcomeFailures = 0;
+            return { ...fallback, taskId: undefined as string | undefined };
+          }
+        }
+
+        console.error(`Implementer <outcome> invalid: ${error.message}`);
+        const fallback = fallbackOutcome(error.commits);
+        if (fallback.status === "blocked") consecutiveOutcomeFailures++;
         else consecutiveOutcomeFailures = 0;
+        return { ...fallback, taskId: undefined as string | undefined };
       }
-    } else {
-      console.error(`Implementer <outcome> invalid: ${error.message}`);
-      ({ status, commits } = fallbackOutcome(error.commits));
-      if (status === "blocked") consecutiveOutcomeFailures++;
-      else consecutiveOutcomeFailures = 0;
-    }
+    },
+  });
+
+  if (!implementResult.ok) {
+    console.log("Implement phase aborted (loop paused).");
+    continue;
   }
+
+  ({ status, taskId, commits } = implementResult.result);
+  runtime.writeState({ taskId: taskId ?? null });
 
   if (consecutiveOutcomeFailures >= MAX_OUTCOME_FAILURES) {
     console.log(
@@ -328,23 +413,53 @@ while (iteration < MAX_ITERATIONS) {
   // -----------------------------------------------------------------------
   if (status === "done" && commits.length > 0) {
     console.log(`Reviewing commit range: ${baseSha}..HEAD`);
+    const reviewerLog = join(loopDir, "reviewer.log");
+    runtime.writeState({ reviewerLog });
 
     try {
-      await run({
-        name: "reviewer",
-        cwd: repoDir,
-        stateDir: workflowDir,
-        maxIterations: 1,
-        agent: claudeCode(),
-        sandbox: docker(),
-        promptFile: join(workflowDir, "review-prompt.md"),
-        promptArgs: {
-          BASE_SHA: baseSha,
+      const reviewResult = await runControlled({
+        controller,
+        runtime,
+        agent: "reviewer",
+        phase: "review",
+        statePatch: {
+          iteration,
+          loopDir,
+          reviewerLog,
+          taskId: taskId ?? null,
         },
-        branchStrategy: { type: "head" },
-        logging: { type: "file" as const, path: join(loopDir, "reviewer.log") },
+        promptFile: join(workflowDir, "review-prompt.md"),
+        execute: async (ctrl) => {
+          await run({
+            name: "reviewer",
+            cwd: repoDir,
+            stateDir: workflowDir,
+            maxIterations: 1,
+            agent: claudeCode(),
+            sandbox: docker(),
+            promptFile: ctrl.promptFile,
+            prompt: ctrl.prompt,
+            resumeSession: ctrl.resumeSession,
+            promptArgs: {
+              BASE_SHA: baseSha,
+            },
+            branchStrategy: { type: "head" },
+            idleTimeoutSeconds: AGENT_IDLE_TIMEOUT_SECONDS,
+            agentRestartLimit: AGENT_RESTART_LIMIT,
+            signal: ctrl.signal,
+            logging: {
+              type: "file" as const,
+              path: reviewerLog,
+              onAgentStreamEvent: ctrl.onAgentStreamEvent,
+            },
+          });
+        },
       });
-      console.log("\nReview complete.");
+      if (!reviewResult.ok) {
+        console.log("Review phase aborted (loop paused).");
+      } else {
+        console.log("\nReview complete.");
+      }
     } catch (error) {
       console.error(`Review failed: ${error}`);
     }
@@ -353,4 +468,6 @@ while (iteration < MAX_ITERATIONS) {
   }
 }
 
+controller.close();
+await controlServer.close().catch(() => {});
 console.log("\nAll done.");

@@ -32,6 +32,8 @@ const plan = await sandcastle.run({
   maxIterations: 1,
   agent: sandcastle.claudeCode(),
   promptFile: join(workflowDir, "plan-prompt.md"),
+  idleTimeoutSeconds: 600,
+  agentRestartLimit: 2,
   output: sandcastle.Output.object({ tag: "plan", schema: planSchema }),
 });
 
@@ -51,6 +53,8 @@ if (issues.length === 0) {
         maxIterations: 100,
         agent: sandcastle.claudeCode(),
         promptFile: join(workflowDir, "implement-prompt.md"),
+        idleTimeoutSeconds: 600,
+        agentRestartLimit: 2,
         promptArgs: {
           TASK_ID: issue.id,
           ISSUE_TITLE: issue.title,
@@ -80,6 +84,8 @@ if (issues.length === 0) {
       maxIterations: 1,
       agent: sandcastle.claudeCode(),
       promptFile: join(workflowDir, "merge-prompt.md"),
+      idleTimeoutSeconds: 600,
+      agentRestartLimit: 2,
       promptArgs: {
         BRANCHES: completedBranches.map((b) => `- ${b}`).join("\n"),
         ISSUES: completedIssues.map((i) => `- ${i.id}: ${i.title}`).join("\n"),

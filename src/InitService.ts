@@ -789,6 +789,9 @@ export function getNextStepsLines(
         `${step++}. Optional: set \`IDLE_POLL_SECONDS\` in .sandcastle/${mainFilename} to 0 to exit when no issues are ready instead of polling`,
       );
       lines.push(
+        `${step++}. Optional: tune \`AGENT_IDLE_TIMEOUT_SECONDS\` / \`AGENT_RESTART_LIMIT\` in .sandcastle/${mainFilename} (and plan) for silent-hang kill + auto-restart`,
+      );
+      lines.push(
         `${step++}. Run \`sandcastle plan\` to start the planning workflow (grill → spec → tickets on requirements issues); run \`npm run sandcastle\` for the implement loop`,
       );
       lines.push(
