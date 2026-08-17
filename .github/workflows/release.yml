@@ -47,7 +47,33 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Create Release Pull Request or Publish to npm
+      - name: Check for unpublished packages
+        id: check
+        run: |
+          HAS_UNPUBLISHED=false
+          for dir in packages/*/; do
+            if [ -f "$dir/package.json" ]; then
+              name=$(node -p "require('./${dir}package.json').name")
+              ver=$(node -p "require('./${dir}package.json').version")
+              # If package or version not on npm, it needs publishing
+              npm view "$name@$ver" version >/dev/null 2>&1 || { HAS_UNPUBLISHED=true; break; }
+            fi
+          done
+          # Also check root package
+          root_name=$(node -p "require('./package.json').name")
+          root_ver=$(node -p "require('./package.json').version")
+          npm view "$root_name@$root_ver" version >/dev/null 2>&1 || HAS_UNPUBLISHED=true
+          echo "has_unpublished=$HAS_UNPUBLISHED" >> "$GITHUB_OUTPUT"
+          echo "Unpublished packages: $HAS_UNPUBLISHED"
+
+      - name: Create Release Pull Request
+        if: steps.check.outputs.has_unpublished == 'false'
+        uses: changesets/action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to npm
+        if: steps.check.outputs.has_unpublished == 'true'
         uses: changesets/action@v1
         with:
           publish: npm run release
