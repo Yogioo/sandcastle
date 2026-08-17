@@ -387,7 +387,13 @@ export interface RunOptions<A extends AgentProvider = AgentProvider> {
   readonly logging?: LoggingOption;
   /** Substring(s) the agent emits to stop the iteration loop early. Matched via `includes` against agent output. (default: `"<promise>COMPLETE</promise>"`) */
   readonly completionSignal?: string | string[];
-  /** Idle timeout in seconds. If the agent produces no output for this long, it fails. Default: 600 (10 minutes) */
+  /**
+   * Idle timeout in seconds. If the agent produces no output for this long,
+   * the iteration fails and the agent auto-restarts (up to `agentRestartLimit`).
+   * Omitted (or `0`) disables the idle timeout entirely — the agent may run
+   * indefinitely without producing output and is never killed for being idle.
+   * Default: disabled.
+   */
   readonly idleTimeoutSeconds?: number;
   /**
    * Max automatic restarts of the agent process after an idle timeout.

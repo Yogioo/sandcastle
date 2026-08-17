@@ -329,7 +329,8 @@ const result = await run({
   // 默认："<promise>COMPLETE</promise>"
   completionSignal: "<promise>COMPLETE</promise>",
 
-  // 空闲超时（秒）——代理每次产生输出时重置。默认：600（10 分钟）
+  // 空闲超时（秒）——代理每次产生输出时重置。省略或 0 = 禁用（默认），
+  // 代理可无限静默运行而不被杀。设为正数可恢复限制。
   idleTimeoutSeconds: 600,
 
   // 代理已发出完成信号但进程尚未退出时的宽限窗口（秒）（“挂起进程”——
@@ -483,7 +484,7 @@ if (closeResult.preservedWorktreePath) {
 | `promptArgs`               | PromptArgs         | —                             | `{{KEY}}` 占位符替换的键值映射                                        |
 | `maxIterations`            | number             | `1`                           | 最大迭代次数                                                          |
 | `completionSignal`         | string \| string[] | `<promise>COMPLETE</promise>` | 代理发出后提前结束迭代循环的字符串                                    |
-| `idleTimeoutSeconds`       | number             | `600`                         | 空闲超时（秒）——每次代理输出事件重置                                  |
+| `idleTimeoutSeconds`       | number             | 禁用                          | 空闲超时（秒）——每次代理输出事件重置；省略或 0 = 不限制，代理可无限静默运行 |
 | `completionTimeoutSeconds` | number             | `60`                          | 观察到完成信号但代理进程未退出后的宽限窗口                            |
 | `name`                     | string             | —                             | 运行显示名                                                            |
 | `logging`                  | object             | file（自动生成）              | `{ type: 'file', path }` 或 `{ type: 'stdout' }`                      |
@@ -608,7 +609,7 @@ await sandbox.close();
 | `promptFile`               | string                 | —      | 提示词文件路径                                        |
 | `maxIterations`            | number                 | 1      | 最大迭代次数                                          |
 | `completionSignal`         | string \| string[]     | —      | 提前结束迭代循环的子串                                |
-| `idleTimeoutSeconds`       | number                 | 600    | 空闲超时（秒）                                        |
+| `idleTimeoutSeconds`       | number                 | 禁用  | 空闲超时（秒）；省略或 0 = 禁用，代理可无限静默运行 |
 | `completionTimeoutSeconds` | number                 | 60     | 完成信号后、进程未退出时的宽限窗口                    |
 | `name`                     | string                 | —      | 可选运行名                                            |
 | `logging`                  | LoggingOption          | file   | 日志模式                                              |
@@ -758,7 +759,7 @@ await run({
 
 #### 完成信号后的挂起进程
 
-代理进程应在发出完成信号后很快退出。若其子进程（`gh`/git 子进程、长驻 MCP 服务器等）继承 stdout 管道并保持打开，父进程可能在逻辑结束后仍挂起。否则 Sandcastle 会等到完整 `idleTimeoutSeconds` 并以 `AgentIdleTimeoutError` 失败，丢弃代理已产生的提交。
+代理进程应在发出完成信号后很快退出。若其子进程（`gh`/git 子进程、长驻 MCP 服务器等）继承 stdout 管道并保持打开，父进程可能在逻辑结束后仍挂起。否则 Sandcastle 会等到完整的空闲超时（若通过 `idleTimeoutSeconds` 启用；默认禁用）并以 `AgentIdleTimeoutError` 失败，丢弃代理已产生的提交。
 
 观察到完成信号后，Sandcastle 会切换到较短的 **完成超时**（默认 60 秒）。超时后运行仍成功结束，并警告进程挂起；`result.commits` 与 `result.completionSignal` 与正常退出一致。每次后续输出行会重置计时器，以便捕获信号后的尾部数据（token 用量、终端 `result` 事件、结构化输出 `<tag>` 等）。
 
@@ -773,7 +774,7 @@ await run({
 });
 ```
 
-与 `idleTimeoutSeconds` 独立：前者在 **看到信号之前**（真正卡死 → 失败）；后者在 **看到信号之后**（挂起进程 → 警告后成功）。见 [ADR 0019](docs/adr/0019-completion-timeout-for-hanging-process.md)。
+与 `idleTimeoutSeconds` 独立：前者在 **看到信号之前**（真正卡死 → 失败）；后者在 **看到信号之后**（挂起进程 → 警告后成功）。`idleTimeoutSeconds` 默认禁用，仅当你显式设置正数时才会在信号前失败。见 [ADR 0019](docs/adr/0019-completion-timeout-for-hanging-process.md)。
 
 ### 结构化输出
 
@@ -992,7 +993,7 @@ sandcastle delete C:/projects/another-repo --yes
 | `copyToWorktree`           | string[]           | —                             | 启动前复制进沙箱的文件路径（不支持 `head` 策略）                                     |
 | `logging`                  | object             | file（自动生成）              | `{ type: 'file', path }` 或 `{ type: 'stdout' }`                                     |
 | `completionSignal`         | string \| string[] | `<promise>COMPLETE</promise>` | 提前结束迭代的完成信号                                                               |
-| `idleTimeoutSeconds`       | number             | `600`                         | 空闲超时（秒）                                                                       |
+| `idleTimeoutSeconds`       | number             | 禁用                          | 空闲超时（秒）；省略或 0 = 禁用                                     |
 | `completionTimeoutSeconds` | number             | `60`                          | 完成信号后挂起进程的宽限窗口。见[挂起进程](#完成信号后的挂起进程)                    |
 | `resumeSession`            | string             | —                             | 恢复先前会话。与 `maxIterations > 1` 不兼容                                          |
 | `signal`                   | AbortSignal        | —                             | 中止时取消运行；worktree 保留                                                        |

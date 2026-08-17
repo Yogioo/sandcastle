@@ -36,14 +36,18 @@ const buildCarryOver = (output: string): string => {
 const buildRestartPrompt = (
   originalPrompt: string,
   previousOutput: string,
-  idleTimeoutMs: number,
+  idleTimeoutMs: number | null,
 ): string => {
   const carryOver = buildCarryOver(previousOutput);
   const progress =
     carryOver.trim() === ""
       ? "(the previous attempt produced no output before it was terminated)"
       : carryOver;
-  return `${originalPrompt}\n\n<previous_attempt>\nYour previous attempt was terminated because no output was received for ${idleTimeoutMs / 1000} seconds (idle timeout), and the process was killed. Your session context is gone, but the workspace state persists. Continue the task from where you left off — do not redo work that was already completed or verified.\n\nLast output from the previous attempt:\n---\n${progress}\n---\n</previous_attempt>`;
+  const idleDuration =
+    idleTimeoutMs === null
+      ? "an extended period"
+      : `${idleTimeoutMs / 1000} seconds`;
+  return `${originalPrompt}\n\n<previous_attempt>\nYour previous attempt was terminated because no output was received for ${idleDuration} (idle timeout), and the process was killed. Your session context is gone, but the workspace state persists. Continue the task from where you left off — do not redo work that was already completed or verified.\n\nLast output from the previous attempt:\n---\n${progress}\n---\n</previous_attempt>`;
 };
 
 const invokeAgent = (
@@ -51,7 +55,7 @@ const invokeAgent = (
   sandboxRepoDir: string,
   prompt: string,
   provider: AgentProvider,
-  idleTimeoutMs: number,
+  idleTimeoutMs: number | null,
   completionTimeoutMs: number,
   completionSignals: readonly string[],
   onText: (text: string) => void,
@@ -143,15 +147,17 @@ const invokeAgent = (
               });
             }),
           );
-        } else {
-          // Pre-signal idle window — failure on expiry.
+        } else if (idleTimeoutMs !== null) {
+          // Pre-signal idle window — failure on expiry. Skipped entirely when
+          // the idle timeout is disabled (idleTimeoutMs === null), so the
+          // agent may run indefinitely without producing output.
           timeoutFiber = Effect.runFork(
             Effect.gen(function* () {
               yield* Effect.sleep(Duration.millis(idleTimeoutMs));
               yield* Deferred.fail(
                 timeoutSignal,
                 new AgentIdleTimeoutError({
-                  message: `Agent idle for ${idleTimeoutMs / 1000} seconds — no output received. Consider increasing the idle timeout with --idle-timeout.`,
+                  message: `Agent idle for ${idleTimeoutMs / 1000} seconds — no output received. Consider raising idleTimeoutSeconds (or omitting it to disable the idle timeout entirely).`,
                   timeoutMs: idleTimeoutMs,
                 }),
               );
@@ -313,13 +319,12 @@ const invokeAgent = (
     return yield* Effect.fail(
       new AgentIdleTimeoutError({
         message: "unreachable",
-        timeoutMs: idleTimeoutMs,
+        timeoutMs: idleTimeoutMs ?? 0,
       }),
     );
   });
 
 const DEFAULT_COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
-const DEFAULT_IDLE_TIMEOUT_SECONDS = 10 * 60; // 600 seconds
 const DEFAULT_COMPLETION_TIMEOUT_SECONDS = 60;
 
 export interface OrchestrateOptions {
@@ -406,8 +411,14 @@ export const orchestrate = (
   SandboxError,
   SandboxFactory | Display | AgentStreamEmitter
 > => {
+  // Idle timeout is opt-in. Omitted (or <= 0) means disabled: the agent may
+  // run indefinitely without producing output and is never killed for being
+  // idle. A positive value re-enables the classic limit (seconds of silence
+  // before the iteration fails and the agent auto-restarts).
   const idleTimeoutMs =
-    (options.idleTimeoutSeconds ?? DEFAULT_IDLE_TIMEOUT_SECONDS) * 1000;
+    options.idleTimeoutSeconds !== undefined && options.idleTimeoutSeconds > 0
+      ? options.idleTimeoutSeconds * 1000
+      : null;
   const completionTimeoutMs =
     (options.completionTimeoutSeconds ?? DEFAULT_COMPLETION_TIMEOUT_SECONDS) *
     1000;

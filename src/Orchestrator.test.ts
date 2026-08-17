@@ -2249,19 +2249,24 @@ describe("Orchestrator Display integration", () => {
     ).toBe(true);
   });
 
-  it("uses 10 minutes as the default idle timeout", async () => {
+  it("does not idle-timeout when idleTimeoutSeconds is omitted (disabled by default)", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "orch-timeout-default-"));
 
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
+    // Mock agent: takes 2 seconds to respond and produces no output during that
+    // time. With the idle timeout disabled (the default) this must succeed;
+    // an enabled limit below 2s would fail with AgentIdleTimeoutError.
     const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
       hostDir,
-      (dir) => makeMockAgentLayer(dir, async () => "done"),
+      (dir) =>
+        makeMockAgentLayer(dir, async () => {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          return "done";
+        }),
     );
 
-    // Verify indirectly: a run that completes quickly should not time out.
-    // The default idle timeout is 600s (10 minutes) — far longer than any mock agent delay.
     const exitResult = await Effect.runPromise(
       orchestrate({
         provider: testProvider,
@@ -2269,14 +2274,48 @@ describe("Orchestrator Display integration", () => {
 
         iterations: 1,
         prompt: "test",
-        // No idleTimeoutSeconds — should default to 10 minutes (600s)
+        // No idleTimeoutSeconds — the idle timeout is disabled by default, so
+        // a silent agent may run indefinitely without being killed.
       }).pipe(
         Effect.provide(Layer.merge(factoryLayer, testDisplayLayer)),
         Effect.exit,
       ),
     );
 
-    // The run completes successfully — default idle timeout is large enough
+    expect(exitResult._tag).toBe("Success");
+  }, 10_000);
+
+  it("does not idle-timeout when idleTimeoutSeconds is 0 (explicitly disabled)", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-timeout-zero-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    // Same silent 2s agent as the failure test above — with 0 the timer must
+    // never be armed.
+    const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
+      hostDir,
+      (dir) =>
+        makeMockAgentLayer(dir, async () => {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          return "done";
+        }),
+    );
+
+    const exitResult = await Effect.runPromise(
+      orchestrate({
+        provider: testProvider,
+        hostRepoDir: hostDir,
+
+        iterations: 1,
+        prompt: "test",
+        idleTimeoutSeconds: 0, // 0 = disabled
+      }).pipe(
+        Effect.provide(Layer.merge(factoryLayer, testDisplayLayer)),
+        Effect.exit,
+      ),
+    );
+
     expect(exitResult._tag).toBe("Success");
   }, 10_000);
 
@@ -2399,7 +2438,7 @@ describe("Orchestrator Display integration", () => {
       if (err instanceof AgentIdleTimeoutError) {
         expect(err.timeoutMs).toBe(100);
         expect(err.message).toContain("idle");
-        expect(err.message).toContain("--idle-timeout");
+        expect(err.message).toContain("idleTimeoutSeconds");
       }
     }
   }, 10_000);
