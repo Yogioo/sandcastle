@@ -33,19 +33,14 @@ If applicable, use RGR to complete the task.
 3. REPEAT until done
 4. REFACTOR the code
 
-# FEEDBACK LOOPS
-
-Before committing, run `npm run typecheck` and `npm run test` to ensure the tests pass.
-
 # COMMIT
 
 Make a git commit. The commit message must:
 
-1. Start with `RALPH:` prefix
-2. Include task completed + PRD reference
-3. Key decisions made
-4. Files changed
-5. Blockers or notes for next iteration
+1. Include task completed + PRD reference
+2. Key decisions made
+3. Files changed
+4. Blockers or notes for next iteration
 
 Keep it concise.
 

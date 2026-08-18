@@ -47,8 +47,7 @@ Review the code changes introduced since `{{BASE_SHA}}` (commits from this imple
 If you find improvements to make:
 
 1. Make the changes directly on this checkout (HEAD)
-2. Run tests and type checking to ensure nothing is broken
-3. Commit describing the refinements
+2. Commit describing the refinements
 
 If the code is already clean and well-structured, do nothing.
 
