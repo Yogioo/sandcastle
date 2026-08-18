@@ -215,6 +215,31 @@
         color: var(--muted);
         font-weight: 600;
       }
+      .log-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: center;
+        margin-bottom: 0.55rem;
+        font-size: 0.82rem;
+      }
+      .log-toolbar label {
+        color: var(--muted);
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        font-weight: 600;
+      }
+      .log-toolbar select {
+        min-width: 12rem;
+        max-width: 100%;
+        padding: 0.35rem 0.45rem;
+        border: 1px solid var(--line);
+        background: white;
+        font: inherit;
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 0.78rem;
+      }
       pre.log {
         margin: 0;
         height: 42vh;
@@ -285,6 +310,12 @@
 
         <section class="panel">
           <h2>Logs</h2>
+          <div class="log-toolbar">
+            <label for="loopSelect">Cycle</label>
+            <select id="loopSelect" aria-label="Select implement/review cycle">
+              <option value="">Follow current cycle</option>
+            </select>
+          </div>
           <div class="logs-grid">
             <div class="log-pane">
               <h3>main</h3>
@@ -342,6 +373,11 @@
         implement: document.getElementById("log-implement"),
         reviewer: document.getElementById("log-reviewer"),
       };
+      const loopSelect = document.getElementById("loopSelect");
+      let selectedLoop = "";
+      let currentLoop = null;
+      let availableLoops = [];
+
       const fields = [
         "runId",
         "iteration",
@@ -390,6 +426,50 @@
           .replaceAll("<", "&lt;")
           .replaceAll(">", "&gt;")
           .replaceAll('"', "&quot;");
+
+      loopSelect.addEventListener("change", () => {
+        selectedLoop = loopSelect.value;
+        void tick();
+      });
+
+      const loopLabel = (loop) => {
+        const iter =
+          loop.iteration != null ? `#${loop.iteration}` : loop.name;
+        const current = loop.name === currentLoop ? " (current)" : "";
+        return `${iter} · ${loop.name}${current}`;
+      };
+
+      const renderLoopSelect = () => {
+        const previous = selectedLoop;
+        const pastLoops = availableLoops.filter(
+          (loop) => loop.name !== currentLoop,
+        );
+        const options = [
+          `<option value="">Follow current${
+            currentLoop ? ` (${currentLoop})` : ""
+          }</option>`,
+          ...pastLoops.map(
+            (loop) =>
+              `<option value="${escapeHtml(loop.name)}">${escapeHtml(
+                loopLabel(loop),
+              )}</option>`,
+          ),
+        ];
+        loopSelect.innerHTML = options.join("");
+        if (
+          previous &&
+          availableLoops.some((loop) => loop.name === previous)
+        ) {
+          loopSelect.value = previous;
+          selectedLoop = previous;
+        } else {
+          loopSelect.value = "";
+          selectedLoop = "";
+        }
+      };
+
+      const activeLoopParam = () =>
+        selectedLoop || currentLoop || null;
 
       const renderBoard = (payload) => {
         if (!payload || payload.ok === false) {
@@ -493,12 +573,31 @@
       const refreshState = async () => {
         const res = await fetch("/api/state");
         if (!res.ok) return;
-        renderState(await res.json());
+        const state = await res.json();
+        renderState(state);
+        if (state.loopDir) {
+          const parts = String(state.loopDir).split(/[/\\]/);
+          currentLoop = parts[parts.length - 1] || null;
+        } else {
+          currentLoop = null;
+        }
+      };
+
+      const refreshLoops = async () => {
+        const res = await fetch("/api/loops");
+        if (!res.ok) return;
+        const payload = await res.json();
+        availableLoops = Array.isArray(payload.loops) ? payload.loops : [];
+        if (payload.current) currentLoop = payload.current;
+        renderLoopSelect();
       };
 
       const refreshLog = async (name) => {
         const el = logEls[name];
-        const res = await fetch(`/api/log?name=${encodeURIComponent(name)}`);
+        const params = new URLSearchParams({ name });
+        const loop = activeLoopParam();
+        if (loop && name !== "main") params.set("loop", loop);
+        const res = await fetch(`/api/log?${params.toString()}`);
         const atBottom =
           el.scrollHeight - el.scrollTop - el.clientHeight < 40;
         el.textContent = res.ok
@@ -520,6 +619,7 @@
         try {
           await Promise.all([
             refreshState(),
+            refreshLoops(),
             refreshLog("main"),
             refreshLog("implement"),
             refreshLog("reviewer"),

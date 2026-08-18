@@ -3,8 +3,9 @@
 //   GET  /           → viz/index.html
 //   GET  /api/state  → state.json
 //   GET  /api/events → events.jsonl (text)
-//   GET  /api/log?name=main|implement|reviewer → log file tail
-//   GET  /api/board  → bd list --json (issue board)
+//   GET  /api/log?name=main|implement|reviewer&loop=<dir> → log file tail
+//   GET  /api/loops  → loop directories for this run (implement/review logs)
+//   GET  /api/board  → bd list --all --json (issue board)
 //   POST /api/command  { type: pause_agent|... }
 //   POST /api/append   { text: "..." }  or raw body
 
@@ -15,10 +16,15 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { extname, join, normalize } from "node:path";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+} from "node:fs";
+import { basename, dirname, extname, join, normalize } from "node:path";
 import { promisify } from "node:util";
-import type { ControlCommand, Runtime } from "./runtime.js";
+import type { ControlCommand, Runtime, RuntimeState } from "./runtime.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -102,12 +108,83 @@ const parseBoardPayload = (
   }
 };
 
+export type LoopInfo = {
+  name: string;
+  iteration: number | null;
+  implementLog: string;
+  reviewerLog: string | null;
+};
+
+const loopIteration = (name: string): number | null => {
+  const match = /^(\d+)/.exec(name);
+  return match ? Number.parseInt(match[1]!, 10) : null;
+};
+
+/** Loop subdirectories under a run dir (each holds implement.log). */
+export const listLoopDirs = (runDir: string): LoopInfo[] => {
+  if (!existsSync(runDir)) return [];
+  return readdirSync(runDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      const dir = join(runDir, entry.name);
+      const implementLog = join(dir, "implement.log");
+      if (!existsSync(implementLog)) return null;
+      const reviewerLog = join(dir, "reviewer.log");
+      return {
+        name: entry.name,
+        iteration: loopIteration(entry.name),
+        implementLog,
+        reviewerLog: existsSync(reviewerLog) ? reviewerLog : null,
+      };
+    })
+    .filter((loop): loop is LoopInfo => loop !== null)
+    .sort((a, b) => {
+      if (a.iteration != null && b.iteration != null) {
+        return a.iteration - b.iteration;
+      }
+      return a.name.localeCompare(b.name);
+    });
+};
+
+export const resolveLogPath = (
+  state: RuntimeState,
+  name: string,
+  loopName: string | null,
+): string | null => {
+  if (name === "main") return state.mainLog;
+  const runDir = state.mainLog ? dirname(state.mainLog) : null;
+  if (!runDir) return null;
+
+  const loop =
+    loopName ??
+    (state.loopDir && state.loopDir.startsWith(runDir)
+      ? basename(state.loopDir)
+      : null);
+  if (!loop) {
+    return name === "implement"
+      ? state.implementLog
+      : name === "reviewer"
+        ? state.reviewerLog
+        : null;
+  }
+
+  const loopDir = join(runDir, loop);
+  if (!existsSync(loopDir)) return null;
+  if (name === "implement") return join(loopDir, "implement.log");
+  if (name === "reviewer") return join(loopDir, "reviewer.log");
+  return null;
+};
+
 const runBdList = async (
   cwd: string,
 ): Promise<{ ok: true; issues: BoardIssue[]; raw: string } | { ok: false; error: string }> => {
   try {
+    // --all: bd list defaults to open-only; the board needs every status column.
     // shell:true so Windows resolves bd.cmd / bd.ps1 the same way the host terminal does.
-    const { stdout } = await execFileAsync("bd", ["list", "--json", "-n", "0"], {
+    const { stdout } = await execFileAsync(
+      "bd",
+      ["list", "--all", "--json", "-n", "0"],
+      {
       cwd,
       encoding: "utf-8",
       timeout: 15_000,
@@ -240,15 +317,21 @@ export const startControlServer = (
           });
           return;
         }
+        if (method === "GET" && url.pathname === "/api/loops") {
+          const state = runtime.readState();
+          const runDir = state.mainLog ? dirname(state.mainLog) : null;
+          const loops = runDir ? listLoopDirs(runDir) : [];
+          sendJson(res, 200, {
+            loops,
+            current: state.loopDir ? basename(state.loopDir) : null,
+          });
+          return;
+        }
         if (method === "GET" && url.pathname === "/api/log") {
           const name = url.searchParams.get("name") ?? "main";
+          const loop = url.searchParams.get("loop");
           const state = runtime.readState();
-          const path =
-            name === "implement"
-              ? state.implementLog
-              : name === "reviewer"
-                ? state.reviewerLog
-                : state.mainLog;
+          const path = resolveLogPath(state, name, loop);
           if (!path) {
             send(res, 404, "log not available yet");
             return;

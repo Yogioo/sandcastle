@@ -2,10 +2,14 @@
 // (src/templates/standard/control/runtime.ts). Lives outside templates/
 // so it is never copied into scaffolded projects.
 
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  listLoopDirs,
+  resolveLogPath,
+} from "./templates/standard/control/server.js";
 import { createRuntime } from "./templates/standard/control/runtime.js";
 
 describe("createRuntime", () => {
@@ -45,5 +49,61 @@ describe("createRuntime", () => {
 
     writeFileSync(runtime.paths.appendInbox, "  \n", "utf-8");
     expect(runtime.takeAppend()).toBeNull();
+  });
+});
+
+describe("control server helpers", () => {
+  it("lists loop directories and resolves log paths by cycle", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sandcastle-loops-"));
+    const runDir = join(dir, "run-test");
+    const loopOne = join(runDir, "01-20260818-170000");
+    const loopTwo = join(runDir, "02-20260818-171000");
+    mkdirSync(loopOne, { recursive: true });
+    mkdirSync(loopTwo, { recursive: true });
+    writeFileSync(join(runDir, "main.log"), "host\n");
+    writeFileSync(join(loopOne, "implement.log"), "implement-1\n");
+    writeFileSync(join(loopOne, "reviewer.log"), "review-1\n");
+    writeFileSync(join(loopTwo, "implement.log"), "implement-2\n");
+
+    expect(listLoopDirs(runDir)).toEqual([
+      {
+        name: "01-20260818-170000",
+        iteration: 1,
+        implementLog: join(loopOne, "implement.log"),
+        reviewerLog: join(loopOne, "reviewer.log"),
+      },
+      {
+        name: "02-20260818-171000",
+        iteration: 2,
+        implementLog: join(loopTwo, "implement.log"),
+        reviewerLog: null,
+      },
+    ]);
+
+    const state = {
+      runId: "run-test",
+      iteration: 2,
+      phase: "implement" as const,
+      agent: "implementer" as const,
+      status: "running" as const,
+      sessionId: null,
+      taskId: null,
+      loopDir: loopTwo,
+      mainLog: join(runDir, "main.log"),
+      implementLog: join(loopTwo, "implement.log"),
+      reviewerLog: null,
+      updatedAt: new Date().toISOString(),
+    };
+
+    expect(resolveLogPath(state, "main", null)).toBe(join(runDir, "main.log"));
+    expect(resolveLogPath(state, "implement", null)).toBe(
+      join(loopTwo, "implement.log"),
+    );
+    expect(resolveLogPath(state, "implement", "01-20260818-170000")).toBe(
+      join(loopOne, "implement.log"),
+    );
+    expect(resolveLogPath(state, "reviewer", "01-20260818-170000")).toBe(
+      join(loopOne, "reviewer.log"),
+    );
   });
 });
